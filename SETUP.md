@@ -67,7 +67,10 @@ and model card first. Split files must all be downloaded; register the first one
 `--context` means tokens **per slot**. With 4096 context and 2 slots, llama.cpp
 receives 8192 total context. Both slots share one model. Continuous batching
 allows overlapping inference. Prefix KV reuse avoids evaluating an unchanged
-prompt prefix again; RAM prompt-cache storage is bounded to 256 MiB per model.
+prompt prefix again; RAM prompt-cache storage defaults to 256 MiB per model. Large hybrid/MTP model
+states can exceed that bound; inspect runtime logs instead of assuming cache hits.
+Tune `--prompt-cache-mib N` deliberately within available host RAM. This stores
+prompt snapshots in RAM; it is separate from the live GPU KV type and context.
 
 ```bash
 ./model-dock tune --model qwen3-0.6b --context 8192 --slots 2 --cache q8_0
@@ -86,6 +89,23 @@ when the configured count is reached; loading a new model may wait or fail when
 all capacity is busy. Keep enough memory for the desktop, other services and KV
 cache. There is no cross-machine load balancing, tenant isolation, billing or
 per-user quota system. Put such requirements in a separate gateway if needed.
+
+`--ubatch-size` sets the physical prompt-processing batch (128–2048, default
+512). The logical batch stays at 2048. More batching can improve prefill but uses
+additional memory and may be slower on another backend; measure before keeping it.
+
+## Native MTP and client output budgets
+
+For a model whose GGUF includes a compatible MTP head, `tune --model ID
+--draft-tokens 3` enables llama.cpp's native MTP speculation. Zero disables it.
+This is opt-in: an arbitrary model/build may not support it, and speed/quality
+must be tested with the actual client. Recheck prefix-cache behavior and memory;
+a faster isolated decode is not automatically a faster agent task.
+
+`client pi --model ID --max-output 4096` sets Pi's per-request output budget in a
+separate profile. The default stays 512 for small probes; larger coding outputs
+need an explicit budget and enough context headroom. Sampling parameters remain
+ordinary private Pi model configuration. No real key is written into examples.
 
 ## Service lifecycle
 

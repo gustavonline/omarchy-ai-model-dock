@@ -1,0 +1,142 @@
+{
+  "profile": "f16-code",
+  "seconds": 300.1,
+  "pi_exit_code": 1,
+  "tools": [
+    "read",
+    "bash",
+    "read",
+    "read",
+    "write",
+    "bash",
+    "edit",
+    "edit",
+    "bash",
+    "read",
+    "edit",
+    "write",
+    "bash",
+    "edit",
+    "edit",
+    "bash",
+    "edit",
+    "bash",
+    "edit",
+    "bash"
+  ],
+  "assistant_turns": 18,
+  "test_exit_code": 1,
+  "tests_unchanged": true,
+  "test_result": "-------------------------------------\nTraceback (most recent call last):\n  File \"<fixture>/test_records.py\", line 21, in test_blank_lines\n    self.assertEqual(parse_records('name,city\\n\\n   \\nAda,Copenhagen\\n\\t\\n'), [{'name':'Ada','city':'Copenhagen'}])\n                     ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<fixture>/src/records.py\", line 21, in parse_records\n    raise ValueError(\n        'row has %d fields, expected %d' % (len(row), len(headers))\n    )\nValueError: row has 1 fields, expected 2\n\n======================================================================\nFAIL: test_empty_values_are_records (test_records.RecordsTest.test_empty_values_are_records)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<fixture>/test_records.py\", line 23, in test_empty_values_are_records\n    self.assertEqual(parse_records('name,city\\n,\\n'), [{'name':'','city':''}])\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [] != [{'name': '', 'city': ''}]\n\nSecond list contains 1 additional elements.\nFirst extra element 0:\n{'name': '', 'city': ''}\n\n- []\n+ [{'city': '', 'name': ''}]\n\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nFAILED (failures=1, errors=1)\n",
+  "assistant_summary": "",
+  "usage": [
+    {
+      "input": 1614,
+      "output": 60,
+      "cacheRead": 0,
+      "totalTokens": 1674
+    },
+    {
+      "input": 220,
+      "output": 53,
+      "cacheRead": 1673,
+      "totalTokens": 1946
+    },
+    {
+      "input": 538,
+      "output": 231,
+      "cacheRead": 1945,
+      "totalTokens": 2714
+    },
+    {
+      "input": 25,
+      "output": 38,
+      "cacheRead": 2713,
+      "totalTokens": 2776
+    },
+    {
+      "input": 676,
+      "output": 107,
+      "cacheRead": 2775,
+      "totalTokens": 3558
+    },
+    {
+      "input": 31,
+      "output": 94,
+      "cacheRead": 3557,
+      "totalTokens": 3682
+    },
+    {
+      "input": 31,
+      "output": 38,
+      "cacheRead": 3681,
+      "totalTokens": 3750
+    },
+    {
+      "input": 3647,
+      "output": 64,
+      "cacheRead": 3749,
+      "totalTokens": 7460
+    },
+    {
+      "input": 206,
+      "output": 189,
+      "cacheRead": 7459,
+      "totalTokens": 7854
+    },
+    {
+      "input": 31,
+      "output": 238,
+      "cacheRead": 7853,
+      "totalTokens": 8122
+    },
+    {
+      "input": 8146,
+      "output": 38,
+      "cacheRead": 0,
+      "totalTokens": 8184
+    },
+    {
+      "input": 708,
+      "output": 219,
+      "cacheRead": 8183,
+      "totalTokens": 9110
+    },
+    {
+      "input": 31,
+      "output": 92,
+      "cacheRead": 9109,
+      "totalTokens": 9232
+    },
+    {
+      "input": 31,
+      "output": 38,
+      "cacheRead": 9231,
+      "totalTokens": 9300
+    },
+    {
+      "input": 636,
+      "output": 160,
+      "cacheRead": 9299,
+      "totalTokens": 10095
+    },
+    {
+      "input": 31,
+      "output": 38,
+      "cacheRead": 10094,
+      "totalTokens": 10163
+    },
+    {
+      "input": 636,
+      "output": 160,
+      "cacheRead": 10162,
+      "totalTokens": 10958
+    },
+    {
+      "input": 31,
+      "output": 38,
+      "cacheRead": 10957,
+      "totalTokens": 11026
+    }
+  ]
+}

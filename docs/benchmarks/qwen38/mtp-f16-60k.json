@@ -1,0 +1,65 @@
+{
+  "label": "mtp-f16-60k",
+  "model": "qwen3.8-27b",
+  "requested_prefix_tokens": 60000,
+  "runs": [
+    {
+      "scenario": "uncached",
+      "ttft_seconds": 648.137,
+      "seconds": 648.88,
+      "correct": true,
+      "answer": "Z13-CHESTNUT-4827",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 60063,
+        "prompt_ms": 647942.19,
+        "prompt_per_token_ms": 10.787709405124618,
+        "prompt_per_second": 92.69808468561062,
+        "predicted_n": 13,
+        "predicted_ms": 740.609,
+        "predicted_per_token_ms": 61.71741666666667,
+        "predicted_per_second": 16.202881682507233,
+        "draft_n": 9,
+        "draft_n_accepted": 9
+      },
+      "usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 60063,
+        "total_tokens": 60076,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "scenario": "warm_prefix",
+      "ttft_seconds": 0.407,
+      "seconds": 1.157,
+      "correct": true,
+      "answer": "Z13-CHESTNUT-4827",
+      "timings": {
+        "cache_n": 60059,
+        "prompt_n": 4,
+        "prompt_ms": 370.019,
+        "prompt_per_token_ms": 92.50475,
+        "prompt_per_second": 10.810255689572697,
+        "predicted_n": 13,
+        "predicted_ms": 748.187,
+        "predicted_per_token_ms": 62.34891666666667,
+        "predicted_per_second": 16.038771055899126,
+        "draft_n": 9,
+        "draft_n_accepted": 9
+      },
+      "usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 60063,
+        "total_tokens": 60076,
+        "prompt_tokens_details": {
+          "cached_tokens": 60059
+        }
+      }
+    }
+  ],
+  "context_per_slot": 65536,
+  "note": "Synthetic inventory and exact marker retrieval; not an agent quality benchmark."
+}

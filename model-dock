@@ -159,16 +159,21 @@ def render(config):
     for flag in ("--models-preset", "--models-max", "--api-key-file", "--cache-ram"):
         if flag not in help_text:
             raise ValueError(f"This llama-server lacks {flag}; build a current router-capable version")
+    if any(m.get("draft_tokens", 0) for m in config["models"]) and "draft-mtp" not in help_text:
+        raise ValueError("This llama-server does not support native MTP drafting")
     lines = ["version = 1", ""]
     for model in config["models"]:
         lines += [f"[{model['id']}]", f"model = {safe_line(model['file'])}",
                   f"ctx-size = {model['context'] * model['slots']}", f"parallel = {model['slots']}",
-                  "cont-batching = true", "cache-prompt = true", "cache-ram = 256",
+                  "cont-batching = true", "cache-prompt = true", f"cache-ram = {model.get('prompt_cache_mib', 256)}",
+                  "batch-size = 2048", f"ubatch-size = {model.get('ubatch_size', 512)}",
                   f"cache-type-k = {model['cache']}", f"cache-type-v = {model['cache']}",
                   "flash-attn = auto", "jinja = true", "load-on-startup = false",
                   "n-gpu-layers = 0" if model["device"] == "cpu" else "n-gpu-layers = 999"]
         if model["device"] != "cpu":
             lines += [f"device = {model['device']}"]
+        if model.get("draft_tokens", 0):
+            lines += ["spec-type = draft-mtp", f"spec-draft-n-max = {model['draft_tokens']}"]
         lines += [""]
     key = CONFIG / "api-key"
     if not key.exists():
@@ -227,7 +232,10 @@ def add(args):
             raise ValueError("One dock uses one llama.cpp build. Use the configured --server")
         config["server"] = binary
         config["models"].append({"id": ident, "file": str(path), "device": device,
-                                 "context": args.context, "slots": args.slots, "cache": args.cache})
+                                 "context": args.context, "slots": args.slots, "cache": args.cache,
+                                 "draft_tokens": getattr(args, "draft_tokens", 0),
+                                 "prompt_cache_mib": getattr(args, "prompt_cache_mib", 256),
+                                 "ubatch_size": getattr(args, "ubatch_size", 512)})
         render(config)
         save(config)
     print(f"Registered {ident}. Start or restart Model Dock to apply.")
@@ -236,17 +244,17 @@ def add(args):
 def tune(args):
     with locked():
         config = load()
-        if not args.model and any(getattr(args, field) is not None for field in ("context", "slots", "cache")):
+        if not args.model and any(getattr(args, field, None) is not None for field in ("context", "slots", "cache", "draft_tokens", "prompt_cache_mib", "ubatch_size")):
             raise ValueError("Per-model tuning requires --model MODEL_ID")
         if args.model:
             model = next((m for m in config["models"] if m["id"] == args.model), None)
             if not model:
                 raise ValueError("Unknown model")
-            for name in ("context", "slots", "cache"):
-                if getattr(args, name) is not None:
+            for name in ("context", "slots", "cache", "draft_tokens", "prompt_cache_mib", "ubatch_size"):
+                if getattr(args, name, None) is not None:
                     model[name] = getattr(args, name)
         for name in ("max_loaded", "port"):
-            if getattr(args, name) is not None:
+            if getattr(args, name, None) is not None:
                 config[name] = getattr(args, name)
         if not config["models"]:
             raise ValueError("Add a model first")
@@ -517,12 +525,17 @@ def client(args):
         raise ValueError("Choose a registered model")
     if model["context"] <= 4096:
         raise ValueError("Agent clients need more context. Tune this model to at least 8192 per slot, restart and test first")
+    output_tokens = getattr(args, "max_output", 512)
+    if args.kind == "codex" and output_tokens != 512:
+        raise ValueError("--max-output configures Pi; use Codex settings for Codex output limits")
+    if output_tokens > model["context"] - 4096:
+        raise ValueError("Output budget must leave the client context safety margin")
     directory = STATE / "clients" / f"{args.kind}-{args.model}"
     base = f"http://127.0.0.1:{config['port']}/v1"
     key = CONFIG / "api-key"
     if args.kind == "pi":
         meta = {"id": args.model, "name": "Model Dock / " + args.model, "input": ["text"],
-                "reasoning": False, "contextWindow": model["context"], "maxTokens": 512,
+                "reasoning": False, "contextWindow": model["context"], "maxTokens": output_tokens,
                 "compat": {"maxTokensField": "max_tokens", "supportsDeveloperRole": False},
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}
         if args.model.lower().startswith("qwen3"):
@@ -632,11 +645,17 @@ def main():
     register.add_argument("--device", default="auto")
     register.add_argument("--context", type=bounded(512, 131072), default=4096, help="tokens per slot")
     register.add_argument("--slots", type=bounded(1, 16), default=2)
+    register.add_argument("--ubatch-size", type=bounded(128, 2048), default=512, help="Physical prompt batch; maximum logical batch is 2048")
+    register.add_argument("--prompt-cache-mib", type=bounded(0, 16384), default=256, help="Host RAM budget for saved prompt states")
+    register.add_argument("--draft-tokens", type=bounded(0, 8), default=0, help="Native MTP draft length; 0 disables")
     register.add_argument("--cache", choices=("f16", "q8_0", "q4_0"), default="f16")
     tuning = sub.add_parser("tune")
     tuning.add_argument("--model")
     tuning.add_argument("--context", type=bounded(512, 131072))
     tuning.add_argument("--slots", type=bounded(1, 16))
+    tuning.add_argument("--ubatch-size", type=bounded(128, 2048))
+    tuning.add_argument("--prompt-cache-mib", type=bounded(0, 16384))
+    tuning.add_argument("--draft-tokens", type=bounded(0, 8))
     tuning.add_argument("--cache", choices=("f16", "q8_0", "q4_0"))
     tuning.add_argument("--max-loaded", type=bounded(1, 8))
     tuning.add_argument("--port", type=bounded(1024, 65535))
@@ -655,6 +674,7 @@ def main():
     consumer = sub.add_parser("client", help="Create a separate Pi/Codex profile without changing defaults")
     consumer.add_argument("kind", choices=("pi", "codex"))
     consumer.add_argument("--model", required=True)
+    consumer.add_argument("--max-output", type=bounded(128, 32768), default=512, help="Pi output budget per request")
     tunnel = sub.add_parser("tunnel", help="Run on a client: forward local port to the server over SSH")
     tunnel.add_argument("host")
     tunnel.add_argument("--local-port", type=bounded(1024, 65535), default=8090)

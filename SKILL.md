@@ -44,6 +44,15 @@ agents. The native panel lives on the right side of Omarchy's bar. Its ID remain
    and concurrent clients. Use `tune --model MODEL_ID --context N --slots N
    --cache f16|q8_0|q4_0` to compare. Quantized KV caches and large contexts need
    architecture/backend checks. A small-model result is not a large-model guarantee.
+   Inspect cache warnings: hybrid/MTP state can exceed the default 256 MiB saved
+   prompt budget. `--prompt-cache-mib N` is host RAM for snapshots, separate from
+   live KV precision. Size it from observed state/memory, not the context alone.
+   `--draft-tokens 3` opts a compatible MTP GGUF into native speculation (0 disables).
+   Compare end-to-end tool work and prefix reuse as well as isolated decode speed.
+   `--ubatch-size` tunes physical prompt batching, up to the fixed logical batch
+   of 2048. Measure new-prompt latency and memory on the target backend.
+   `client pi --model ID --max-output 4096` permits a useful coding output budget;
+   the default 512 is for small probes. Keep the safety margin in the real context.
    Restart only with action authority: it interrupts active requests.
 
 ## Serve and connect

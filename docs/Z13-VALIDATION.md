@@ -79,3 +79,6 @@ running with the two small models and a two-model resident limit.
 - macOS service lifecycle, MLX and Apple Linux GPU performance: [issue #13](https://github.com/gustavonline/omarchy-llama-cpp-local-ai/issues/13).
 - Future Omarchy/llama.cpp versions. User-owned paths and native APIs reduce
   update coupling; they are not a promise of compatibility with every update.
+
+Qwen 3.8 27B and near-full 64K input were subsequently qualified in the
+[dated follow-up](QWEN38-Z13.md); the limits above describe the initial small-model release.

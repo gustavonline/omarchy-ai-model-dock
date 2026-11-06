@@ -1,0 +1,92 @@
+{
+  "created_utc": "2026-11-06T10:42:45Z",
+  "model": "qwen3.8-27b",
+  "clients": 1,
+  "settings": {
+    "id": "qwen3.8-27b",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "device": "Vulkan0",
+    "context": 65536,
+    "slots": 1,
+    "cache": "f16"
+  },
+  "notes": "Synthetic ~800-token common prefix; first run may include model loading. Not a model-quality evaluation or a clean KV-cache reset.",
+  "runs": [
+    {
+      "scenario": "uncached",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 3.9125,
+      "visible_ttft_seconds": 3.9125,
+      "total_seconds": 6.2796,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 758,
+        "prompt_ms": 3901.978,
+        "prompt_per_token_ms": 5.147728232189974,
+        "prompt_per_second": 194.26044944384617,
+        "predicted_n": 30,
+        "predicted_ms": 2366.869,
+        "predicted_per_token_ms": 81.61617241379311,
+        "predicted_per_second": 12.252473626550518
+      }
+    },
+    {
+      "scenario": "warm_prefix",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 0.152,
+      "visible_ttft_seconds": 0.152,
+      "total_seconds": 2.5885,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 754,
+        "prompt_n": 4,
+        "prompt_ms": 144.482,
+        "prompt_per_token_ms": 36.1205,
+        "prompt_per_second": 27.6851095638211,
+        "predicted_n": 30,
+        "predicted_ms": 2436.232,
+        "predicted_per_token_ms": 84.008,
+        "predicted_per_second": 11.90362822588325
+      }
+    },
+    {
+      "scenario": "warm_prefix_repeat",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 0.1514,
+      "visible_ttft_seconds": 0.1514,
+      "total_seconds": 2.5956,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 754,
+        "prompt_n": 4,
+        "prompt_ms": 143.968,
+        "prompt_per_token_ms": 35.992,
+        "prompt_per_second": 27.783951989330966,
+        "predicted_n": 30,
+        "predicted_ms": 2444.3,
+        "predicted_per_token_ms": 84.28620689655173,
+        "predicted_per_second": 11.864337438121343
+      }
+    },
+    {
+      "scenario": "concurrent",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 3.2883,
+      "visible_ttft_seconds": 3.2883,
+      "total_seconds": 5.714,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 242,
+        "prompt_n": 520,
+        "prompt_ms": 3278.187,
+        "prompt_per_token_ms": 6.304205769230769,
+        "prompt_per_second": 158.62426396053672,
+        "predicted_n": 30,
+        "predicted_ms": 2425.596,
+        "predicted_per_token_ms": 83.64124137931034,
+        "predicted_per_second": 11.955824465409739
+      }
+    }
+  ]
+}

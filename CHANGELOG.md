@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.1
+
+- Add per-model saved-prompt RAM budgets, physical prompt batches and opt-in native MTP draft length.
+- Let Pi client profiles choose a useful output budget while respecting context headroom.
+- Record real Qwen 3.8 27B / 64K and Pi coding-task validation on Strix Halo.
+
 ## 0.11.0 — Omarchy Model Dock
 
 - Add a hardware/device probe, pinned GGUF downloads and a user-owned llama.cpp

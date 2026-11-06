@@ -1,0 +1,50 @@
+{
+  "draft_tokens": 4,
+  "probe": "Python code generation",
+  "runs": [
+    {
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 5.2598,
+      "visible_ttft_seconds": 5.2598,
+      "total_seconds": 17.2196,
+      "completion_tokens": 288,
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 787,
+        "prompt_ms": 5213.929,
+        "prompt_per_token_ms": 6.625068614993647,
+        "prompt_per_second": 150.9418329248442,
+        "predicted_n": 288,
+        "predicted_ms": 11959.753,
+        "predicted_per_token_ms": 41.67161324041812,
+        "predicted_per_second": 23.997151111732826,
+        "draft_n": 292,
+        "draft_n_accepted": 218
+      },
+      "scenario": "new_prompt",
+      "observed_decode_tps": 24.08
+    },
+    {
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 0.1584,
+      "visible_ttft_seconds": 0.1584,
+      "total_seconds": 10.3211,
+      "completion_tokens": 267,
+      "timings": {
+        "cache_n": 783,
+        "prompt_n": 4,
+        "prompt_ms": 151.176,
+        "prompt_per_token_ms": 37.794,
+        "prompt_per_second": 26.45922633222205,
+        "predicted_n": 267,
+        "predicted_ms": 10162.663,
+        "predicted_per_token_ms": 38.2055,
+        "predicted_per_second": 26.174241928518146,
+        "draft_n": 252,
+        "draft_n_accepted": 206
+      },
+      "scenario": "warm_prefix",
+      "observed_decode_tps": 26.27
+    }
+  ]
+}

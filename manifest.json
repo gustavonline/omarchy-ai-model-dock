@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.gustavonline.local-ai",
   "name": "Omarchy Model Dock",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "author": "Gustav Andersen",
   "license": "MIT",
   "description": "Prepare, serve and connect local models with native Omarchy controls and an agent CLI.",

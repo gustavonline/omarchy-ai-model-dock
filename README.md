@@ -91,3 +91,6 @@ User settings, model files and secrets live outside the checkout. The plugin
 uses native shell components and theme tokens, without modifying Omarchy’s
 system files. Updates still require validation against the installed shell and
 runtime versions; see [releasing](RELEASING.md).
+
+The [Qwen 3.8 27B / 64K follow-up](docs/QWEN38-Z13.md) includes real Pi coding work,
+long-prefix reuse and measured cache/draft/batch settings on Z13.

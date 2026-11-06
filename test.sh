@@ -7,7 +7,7 @@ jq -e '
   .schemaVersion == 1 and
   .id == "io.github.gustavonline.local-ai" and
   .name == "Omarchy Model Dock" and
-  .version == "0.11.0" and
+  .version == "0.11.1" and
   (.kinds | index("bar-widget")) != null and
   .entryPoints.barWidget == "Panel.qml"
 ' "$plugin_dir/manifest.json" >/dev/null

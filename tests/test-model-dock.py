@@ -71,7 +71,7 @@ class DockTest(unittest.TestCase):
     def config_value(self, port=8090):
         return {"version": 1, "port": port, "max_loaded": 2, "server": "/runtime/llama-server",
                 "models": [{"id": "test", "file": "/models/hello world.gguf", "device": "Vulkan0",
-                            "context": 4096, "slots": 2, "cache": "f16"}]}
+                            "context": 4096, "slots": 2, "cache": "f16", "prompt_cache_mib": 1024}]}
 
     def test_atomic_private_and_versioned_config(self):
         dock.save(self.config_value())
@@ -89,6 +89,7 @@ class DockTest(unittest.TestCase):
         preset = (self.config / "models.ini").read_text()
         self.assertIn("ctx-size = 8192", preset)
         self.assertIn("parallel = 2", preset)
+        self.assertIn("cache-ram = 1024", preset)
         self.assertIn("load-on-startup = false", preset)
         service = (self.home / "systemd/user" / dock.UNIT).read_text()
         self.assertIn('"--host" "127.0.0.1"', service)
@@ -105,6 +106,16 @@ class DockTest(unittest.TestCase):
             first = (self.config / "api-key").read_bytes()
             dock.render(self.config_value())
         self.assertEqual(first, (self.config / "api-key").read_bytes())
+
+    def test_unsupported_mtp_does_not_replace_presets(self):
+        dock.atomic(self.config / "models.ini", "owner preset\n")
+        config = self.config_value()
+        config["models"][0]["draft_tokens"] = 3
+        result = argparse.Namespace(stdout="--models-preset --models-max --api-key-file --cache-ram")
+        with patch.object(dock, "run", return_value=result), patch.object(dock.platform, "system", return_value="Linux"), \
+                patch.object(dock.shutil, "which", return_value="systemctl"), self.assertRaises(ValueError):
+            dock.render(config)
+        self.assertEqual((self.config / "models.ini").read_text(), "owner preset\n")
 
     def test_unrelated_service_is_preserved(self):
         path = self.home / "systemd/user" / dock.UNIT
@@ -141,11 +152,15 @@ class DockTest(unittest.TestCase):
     def test_client_profile_does_not_embed_key_or_replace_defaults(self):
         config = self.config_value()
         dock.save(config)
-        args = argparse.Namespace(kind="pi", model="test")
+        args = argparse.Namespace(kind="pi", model="test", max_output=512)
         with self.assertRaises(ValueError):
             dock.client(args)
         config["models"][0]["context"] = 8192
         dock.save(config)
+        with self.assertRaises(ValueError):
+            dock.client(argparse.Namespace(kind="pi", model="test", max_output=8192))
+        with self.assertRaises(ValueError):
+            dock.client(argparse.Namespace(kind="codex", model="test", max_output=4096))
         dock.atomic(self.config / "api-key", "PRIVATE-CREDENTIAL\n")
         with patch("sys.stdout", io.StringIO()):
             dock.client(args)

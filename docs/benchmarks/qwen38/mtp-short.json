@@ -1,0 +1,101 @@
+{
+  "created_utc": "2026-11-06T10:54:39Z",
+  "model": "qwen3.8-27b",
+  "clients": 1,
+  "settings": {
+    "id": "qwen3.8-27b",
+    "file": "Qwen3.8-27B-Q4_K_M.gguf",
+    "device": "Vulkan0",
+    "context": 65536,
+    "slots": 1,
+    "cache": "f16",
+    "draft_tokens": 3
+  },
+  "notes": "Synthetic ~800-token common prefix; first run may include model loading. Not a model-quality evaluation or a clean KV-cache reset.",
+  "runs": [
+    {
+      "scenario": "uncached",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 5.1985,
+      "visible_ttft_seconds": 5.1985,
+      "total_seconds": 6.5318,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 758,
+        "prompt_ms": 5190.107,
+        "prompt_per_token_ms": 6.847106860158311,
+        "prompt_per_second": 146.04708534910745,
+        "predicted_n": 30,
+        "predicted_ms": 1332.76,
+        "predicted_per_token_ms": 45.95724137931035,
+        "predicted_per_second": 21.75935652330502,
+        "draft_n": 24,
+        "draft_n_accepted": 24
+      }
+    },
+    {
+      "scenario": "warm_prefix",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 0.1815,
+      "visible_ttft_seconds": 0.1815,
+      "total_seconds": 1.4505,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 754,
+        "prompt_n": 4,
+        "prompt_ms": 174.596,
+        "prompt_per_token_ms": 43.649,
+        "prompt_per_second": 22.910032303145545,
+        "predicted_n": 30,
+        "predicted_ms": 1268.732,
+        "predicted_per_token_ms": 43.74937931034483,
+        "predicted_per_second": 22.857467140420514,
+        "draft_n": 24,
+        "draft_n_accepted": 24
+      }
+    },
+    {
+      "scenario": "warm_prefix_repeat",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 0.1658,
+      "visible_ttft_seconds": 0.1658,
+      "total_seconds": 1.4672,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 754,
+        "prompt_n": 4,
+        "prompt_ms": 158.69,
+        "prompt_per_token_ms": 39.6725,
+        "prompt_per_second": 25.206377213435,
+        "predicted_n": 30,
+        "predicted_ms": 1301.434,
+        "predicted_per_token_ms": 44.87703448275862,
+        "predicted_per_second": 22.283112320716995,
+        "draft_n": 24,
+        "draft_n_accepted": 24
+      }
+    },
+    {
+      "scenario": "concurrent",
+      "model": "qwen3.8-27b",
+      "ttft_seconds": 3.9089,
+      "visible_ttft_seconds": 3.9089,
+      "total_seconds": 5.1998,
+      "completion_tokens": 30,
+      "timings": {
+        "cache_n": 242,
+        "prompt_n": 520,
+        "prompt_ms": 3902.147,
+        "prompt_per_token_ms": 7.504128846153846,
+        "prompt_per_second": 133.2599720102805,
+        "predicted_n": 30,
+        "predicted_ms": 1290.869,
+        "predicted_per_token_ms": 44.51272413793103,
+        "predicted_per_second": 22.465486428134845,
+        "draft_n": 24,
+        "draft_n_accepted": 24
+      }
+    }
+  ]
+}

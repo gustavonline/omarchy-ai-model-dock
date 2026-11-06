@@ -1,0 +1,113 @@
+{
+  "profile": "mtp-conservative-code",
+  "seconds": 114.54,
+  "pi_exit_code": 0,
+  "tools": [
+    "read",
+    "read",
+    "bash",
+    "read",
+    "write",
+    "bash",
+    "edit",
+    "bash",
+    "edit",
+    "bash",
+    "write",
+    "bash",
+    "bash",
+    "edit",
+    "bash"
+  ],
+  "assistant_turns": 14,
+  "test_exit_code": 0,
+  "tests_unchanged": true,
+  "test_result": "test_basic (test_records.RecordsTest.test_basic) ... ok\ntest_blank_lines (test_records.RecordsTest.test_blank_lines) ... ok\ntest_comma (test_records.RecordsTest.test_comma) ... ok\ntest_duplicate_headers (test_records.RecordsTest.test_duplicate_headers) ... ok\ntest_empty (test_records.RecordsTest.test_empty) ... ok\ntest_empty_header (test_records.RecordsTest.test_empty_header) ... ok\ntest_empty_values_are_records (test_records.RecordsTest.test_empty_values_are_records) ... ok\ntest_extra_row (test_records.RecordsTest.test_extra_row) ... ok\ntest_header_bom_and_whitespace (test_records.RecordsTest.test_header_bom_and_whitespace) ... ok\ntest_newline (test_records.RecordsTest.test_newline) ... ok\ntest_quotes (test_records.RecordsTest.test_quotes) ... ok\ntest_short_row (test_records.RecordsTest.test_short_row) ... ok\ntest_values_unchanged (test_records.RecordsTest.test_values_unchanged) ... ok\n\n----------------------------------------------------------------------\nRan 13 tests in 0.000s\n\nOK\n",
+  "assistant_summary": "All 13 tests pass.\n\n**Change summary:** Replaced the naive `split(',')` parser in `src/records.py` with a proper implementation using `csv.reader` over an `io.StringIO`:\n\n- **BOM handling:** strips a leading UTF-8 BOM (`\\ufeff`) before parsing.\n- **Quoting / embedded newlines / CRLF:** delegated to the stdlib `csv` module, which handles all of these correctly.\n- **Blank-line filtering:** skips rows that are empty lists (truly blank physical lines) or single-field rows whose only field is whitespace-only — while preserving records whose fields are all empty strings (e.g. `','`).\n- **Header validation:** strips whitespace from header names, rejects blank or duplicate names with `ValueError`.\n- **Field-count validation:** rejects non-blank rows whose field count differs from the header with `ValueError`.\n- **Values unchanged:** field values are passed through as-is (no stripping).",
+  "usage": [
+    {
+      "input": 1615,
+      "output": 86,
+      "cacheRead": 0,
+      "totalTokens": 1701
+    },
+    {
+      "input": 268,
+      "output": 26,
+      "cacheRead": 1701,
+      "totalTokens": 1995
+    },
+    {
+      "input": 474,
+      "output": 213,
+      "cacheRead": 1996,
+      "totalTokens": 2683
+    },
+    {
+      "input": 23,
+      "output": 38,
+      "cacheRead": 2684,
+      "totalTokens": 2745
+    },
+    {
+      "input": 438,
+      "output": 158,
+      "cacheRead": 2746,
+      "totalTokens": 3342
+    },
+    {
+      "input": 29,
+      "output": 38,
+      "cacheRead": 3343,
+      "totalTokens": 3410
+    },
+    {
+      "input": 754,
+      "output": 116,
+      "cacheRead": 3411,
+      "totalTokens": 4281
+    },
+    {
+      "input": 30,
+      "output": 38,
+      "cacheRead": 4281,
+      "totalTokens": 4349
+    },
+    {
+      "input": 438,
+      "output": 398,
+      "cacheRead": 4350,
+      "totalTokens": 5186
+    },
+    {
+      "input": 25,
+      "output": 38,
+      "cacheRead": 5185,
+      "totalTokens": 5248
+    },
+    {
+      "input": 435,
+      "output": 149,
+      "cacheRead": 5249,
+      "totalTokens": 5833
+    },
+    {
+      "input": 42,
+      "output": 139,
+      "cacheRead": 5833,
+      "totalTokens": 6014
+    },
+    {
+      "input": 30,
+      "output": 38,
+      "cacheRead": 6014,
+      "totalTokens": 6082
+    },
+    {
+      "input": 250,
+      "output": 208,
+      "cacheRead": 6083,
+      "totalTokens": 6541
+    }
+  ]
+}

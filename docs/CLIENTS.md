@@ -143,3 +143,7 @@ test models and may need larger context for an agent's system prompt.
 
 This plugin does not overwrite existing client credentials or change your
 default cloud/local provider.
+
+For larger coding tasks, `client pi --model MODEL --max-output 4096` avoids
+the small-probe default of 512 output tokens. The [Qwen 3.8 follow-up](QWEN38-Z13.md)
+records a tested 64K model profile and task-specific sampling.
