@@ -1,21 +1,30 @@
 {
   "schemaVersion": 1,
   "id": "io.github.gustavonline.local-ai",
-  "name": "Local AI",
-  "version": "0.10.0",
+  "name": "Omarchy Model Dock",
+  "version": "0.11.0",
   "author": "Gustav Andersen",
   "license": "MIT",
-  "description": "Control local model endpoints and an optional always-on local assistant from one Omarchy panel.",
-  "kinds": ["bar-widget"],
+  "description": "Prepare, serve and connect local models with native Omarchy controls and an agent CLI.",
+  "kinds": [
+    "bar-widget"
+  ],
   "activation": "on-demand",
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Local AI",
-    "description": "Control prepared llama.cpp runtimes and opt into proactive local suggestions.",
+    "displayName": "Model Dock",
+    "description": "Local inference, authenticated endpoints and optional Assistant.",
     "category": "AI",
-    "aliases": ["local-ai", "llama.cpp", "models", "runtime", "assistant", "pi"],
+    "aliases": [
+      "model-dock",
+      "local-models",
+      "local-ai",
+      "llama.cpp",
+      "inference",
+      "assistant"
+    ],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
@@ -26,7 +35,7 @@
       {
         "key": "localConfigFile",
         "type": "path",
-        "label": "llama.cpp profiles",
+        "label": "Existing runtime profiles",
         "defaultValue": "~/.config/omarchy/local-ai.toml",
         "description": "TOML index of prepared llama.cpp systemd user services."
       },

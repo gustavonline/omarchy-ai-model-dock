@@ -6,8 +6,8 @@ plugin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 jq -e '
   .schemaVersion == 1 and
   .id == "io.github.gustavonline.local-ai" and
-  .name == "Local AI" and
-  .version == "0.10.0" and
+  .name == "Omarchy Model Dock" and
+  .version == "0.11.0" and
   (.kinds | index("bar-widget")) != null and
   .entryPoints.barWidget == "Panel.qml"
 ' "$plugin_dir/manifest.json" >/dev/null
@@ -23,7 +23,7 @@ for file in "$plugin_dir/local-ai-control" "$plugin_dir/local-ai-assistant" "$pl
 done
 grep -qE 'id: feedbackClearTimer' "$plugin_dir/Panel.qml"
 grep -qE 'function showTransientFeedback\(message\)' "$plugin_dir/Panel.qml"
-grep -qE 'showTransientFeedback\("Endpoint copied"\)' "$plugin_dir/Panel.qml"
+grep -qE 'showTransientFeedback\(root.copyLabel\)' "$plugin_dir/Panel.qml"
 "$plugin_dir/local-ai-control" --config "$plugin_dir/local-ai.example.toml" status | jq -e '
   (.profile | type == "string") and
   (.state | type == "string") and
@@ -415,7 +415,7 @@ grep -q 'id: suggestionWindow' "$plugin_dir/Panel.qml"
 grep -q 'text: "ALWAYS-ON ASSISTANT"' "$plugin_dir/Panel.qml"
 grep -q 'text: "LOCAL MODEL RUNTIME"' "$plugin_dir/Panel.qml"
 grep -q 'label: "Always-on Assistant"' "$plugin_dir/Panel.qml"
-grep -q 'text: root.settingsPage ? "Assistant settings" : "Local AI"' "$plugin_dir/Panel.qml"
+grep -q 'text: root.settingsPage ? "Assistant settings" : "Model Dock"' "$plugin_dir/Panel.qml"
 grep -q 'label: "Blocked apps"' "$plugin_dir/Panel.qml"
 grep -q 'label: "Preferred harness"' "$plugin_dir/Panel.qml"
 grep -q 'text: "View memory"' "$plugin_dir/Panel.qml"
@@ -497,3 +497,5 @@ if command -v omarchy >/dev/null; then
 fi
 
 printf 'Local AI runtime and Assistant checks passed\n'
+
+python3 "$plugin_dir/tests/test-model-dock.py"

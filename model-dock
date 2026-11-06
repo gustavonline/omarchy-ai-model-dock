@@ -1,0 +1,711 @@
+#!/usr/bin/env python3
+"""Omarchy Model Dock: user-owned llama.cpp provisioning and diagnostics."""
+import argparse
+import concurrent.futures
+import contextlib
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import secrets
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = Path(__file__).resolve().parent
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "omarchy/model-dock"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy/model-dock"
+DATA = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "models/model-dock"
+UNIT = "omarchy-model-dock.service"
+SOURCE_REVISION = "52c9bad94678485e82362331cb62b4f71fd3f0e6"
+
+
+def emit(value):
+    print(json.dumps(value, indent=2, ensure_ascii=False))
+
+
+def run(argv, check=True, timeout=30):
+    return subprocess.run([str(x) for x in argv], text=True, capture_output=True,
+                          check=check, timeout=timeout)
+
+
+def atomic(path, text, mode=0o600):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name, dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+@contextlib.contextmanager
+def locked():
+    CONFIG.mkdir(parents=True, exist_ok=True)
+    with (CONFIG / "lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def load():
+    path = CONFIG / "config.json"
+    if not path.exists():
+        return {"version": 1, "port": 8090, "max_loaded": 1, "models": []}
+    value = json.loads(path.read_text())
+    if value.get("version") != 1:
+        raise ValueError("Unsupported Model Dock configuration version")
+    return value
+
+
+def save(config):
+    atomic(CONFIG / "config.json", json.dumps(config, indent=2) + "\n")
+
+
+def binaries():
+    paths = [shutil.which("llama-server")]
+    for pattern in ("llama.cpp*/bin/llama-server", "model-dock-llama-*/bin/llama-server"):
+        paths += [str(p) for p in (Path.home() / ".local/opt").glob(pattern)]
+    return list(dict.fromkeys(str(Path(p).resolve()) for p in paths if p and Path(p).is_file()))
+
+
+def devices(binary):
+    result = run([binary, "--list-devices"], check=False)
+    if result.returncode:
+        raise ValueError(f"Runtime cannot enumerate devices: {binary}")
+    return [{"id": m[0], "description": m[1]} for m in
+            re.findall(r"^\s*([A-Za-z]+\d+):\s*(.+)$", result.stdout + result.stderr, re.M)]
+
+
+def probe():
+    memory = {}
+    if Path("/proc/meminfo").exists():
+        values = dict(re.findall(r"^(\w+):\s*(\d+)", Path("/proc/meminfo").read_text(), re.M))
+        memory = {"total_gib": round(int(values["MemTotal"]) / 1048576, 1),
+                  "available_gib": round(int(values["MemAvailable"]) / 1048576, 1)}
+    elif platform.system() == "Darwin":
+        memory = {"total_gib": round(int(run(["sysctl", "-n", "hw.memsize"]).stdout) / 2**30, 1)}
+    runtimes = []
+    for binary in binaries():
+        try:
+            version = run([binary, "--version"], check=False)
+            runtimes.append({"path": binary, "devices": devices(binary),
+                             "version": (version.stdout + version.stderr).strip()[:240]})
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            runtimes.append({"path": binary, "error": str(error)})
+    gpu = ""
+    if shutil.which("lspci"):
+        gpu = "\n".join(line for line in run(["lspci"], check=False).stdout.splitlines()
+                        if re.search("VGA|Display|3D controller", line, re.I))
+    apple = platform.system() == "Darwin" and platform.machine() == "arm64"
+    return {"os": platform.system(), "arch": platform.machine(), "cpu_threads": os.cpu_count(),
+            "memory": memory, "gpu": gpu, "runtimes": runtimes,
+            "recommendation": "Compare MLX and llama.cpp Metal on this Mac" if apple else
+            "Use a detected llama.cpp device; benchmark before choosing another build",
+            "mlx": "Apple Metal requires macOS; Linux MLX CPU/CUDA does not provide Apple Metal",
+            "tested_platform": "Linux + llama.cpp Vulkan on AMD Strix Halo",
+            "other_backends": "CUDA, HIP, Metal and Apple Linux require hardware-specific verification"}
+
+
+def select_runtime(path=None, device="auto"):
+    candidates = [str(Path(path).expanduser().resolve())] if path else binaries()
+    usable = []
+    for binary in candidates:
+        try:
+            found = devices(binary)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            if path:
+                raise
+            continue
+        usable.append(binary)
+        if device == "auto" and found:
+            return binary, found[0]["id"]
+        if device != "auto" and (device == "cpu" or device in [d["id"] for d in found]):
+            return binary, device
+    if usable and device == "auto":
+        return usable[0], "cpu"
+    raise ValueError("No compatible llama-server/device. Run inspect, then build --backend BACKEND or supply --server PATH")
+
+
+def safe_line(value):
+    value = str(value)
+    if any(c in value for c in "\r\n\x00"):
+        raise ValueError("Configuration values must be single lines")
+    return value
+
+
+def unit_arg(value):
+    return '"' + safe_line(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
+
+
+def render(config):
+    if platform.system() != "Linux" or not shutil.which("systemctl"):
+        raise ValueError("Managed services currently require Linux + systemd; macOS serving is tracked separately")
+    binary = config["server"]
+    help_text = run([binary, "--help"], check=False).stdout
+    for flag in ("--models-preset", "--models-max", "--api-key-file", "--cache-ram"):
+        if flag not in help_text:
+            raise ValueError(f"This llama-server lacks {flag}; build a current router-capable version")
+    lines = ["version = 1", ""]
+    for model in config["models"]:
+        lines += [f"[{model['id']}]", f"model = {safe_line(model['file'])}",
+                  f"ctx-size = {model['context'] * model['slots']}", f"parallel = {model['slots']}",
+                  "cont-batching = true", "cache-prompt = true", "cache-ram = 256",
+                  f"cache-type-k = {model['cache']}", f"cache-type-v = {model['cache']}",
+                  "flash-attn = auto", "jinja = true", "load-on-startup = false",
+                  "n-gpu-layers = 0" if model["device"] == "cpu" else "n-gpu-layers = 999"]
+        if model["device"] != "cpu":
+            lines += [f"device = {model['device']}"]
+        lines += [""]
+    key = CONFIG / "api-key"
+    if not key.exists():
+        atomic(key, secrets.token_urlsafe(32) + "\n")
+    if key.is_symlink() or key.stat().st_mode & 0o077:
+        raise ValueError("API key must be a private regular file (chmod 600)")
+    atomic(CONFIG / "models.ini", "\n".join(lines))
+    argv = [binary, "--models-preset", CONFIG / "models.ini", "--models-max", config["max_loaded"],
+            "--host", "127.0.0.1", "--port", config["port"], "--api-key-file", key, "--no-webui"]
+    for flag in ("--no-agent", "--no-webui-mcp-proxy", "--no-cors-credentials"):
+        if flag in help_text:
+            argv += [flag]
+    if "--cors-origins" in help_text:
+        argv += ["--cors-origins", "localhost"]
+    # A router with an empty discovery directory serves only explicitly registered models.
+    empty = CONFIG / "discovery"
+    empty.mkdir(exist_ok=True)
+    argv += ["--models-dir", empty]
+    service = "\n".join(["[Unit]", "Description=Omarchy Model Dock", "After=network.target", "",
+        "[Service]", "Type=simple", "ExecStart=" + " ".join(unit_arg(x) for x in argv),
+        "Restart=on-failure", "RestartSec=5", "TimeoutStopSec=30", "KillMode=control-group",
+        "UMask=0077", "NoNewPrivileges=yes", "LimitCORE=0", "PrivateTmp=yes",
+        "ProtectSystem=strict", "ProtectHome=read-only", "ReadWritePaths=-%h/.cache",
+        "InaccessiblePaths=-%h/.ssh -%h/.gnupg -%h/.aws -%h/.codex",
+        "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX", "",
+        "[Install]", "WantedBy=default.target", ""])
+    target = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd/user" / UNIT
+    if target.exists() and "Description=Omarchy Model Dock\n" not in target.read_text():
+        raise ValueError(f"Refusing to overwrite an unrelated service: {target}")
+    atomic(target, service)
+    run(["systemctl", "--user", "daemon-reload"])
+
+
+def validate_id(value):
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}", value):
+        raise ValueError("Model ID must contain 1–64 letters, digits, dots, hyphens or underscores")
+    return value
+
+
+def add(args):
+    path = Path(args.file).expanduser().resolve(strict=True)
+    with path.open("rb") as stream:
+        if stream.read(4) != b"GGUF":
+            raise ValueError("Expected a GGUF file")
+    safe_line(path)
+    # INI comment characters have ambiguous interpretation; never rewrite filenames.
+    if any(c in str(path) for c in "#;[]"):
+        raise ValueError("Model path cannot contain INI delimiters # ; [ ]")
+    ident = validate_id(args.name or path.stem)
+    binary, device = select_runtime(args.server, args.device)
+    with locked():
+        config = load()
+        if any(m["id"] == ident for m in config["models"]):
+            raise ValueError("Model already registered; use tune for settings changes")
+        if config["models"] and binary != config["server"]:
+            raise ValueError("One dock uses one llama.cpp build. Use the configured --server")
+        config["server"] = binary
+        config["models"].append({"id": ident, "file": str(path), "device": device,
+                                 "context": args.context, "slots": args.slots, "cache": args.cache})
+        render(config)
+        save(config)
+    print(f"Registered {ident}. Start or restart Model Dock to apply.")
+
+
+def tune(args):
+    with locked():
+        config = load()
+        if not args.model and any(getattr(args, field) is not None for field in ("context", "slots", "cache")):
+            raise ValueError("Per-model tuning requires --model MODEL_ID")
+        if args.model:
+            model = next((m for m in config["models"] if m["id"] == args.model), None)
+            if not model:
+                raise ValueError("Unknown model")
+            for name in ("context", "slots", "cache"):
+                if getattr(args, name) is not None:
+                    model[name] = getattr(args, name)
+        for name in ("max_loaded", "port"):
+            if getattr(args, name) is not None:
+                config[name] = getattr(args, name)
+        if not config["models"]:
+            raise ValueError("Add a model first")
+        render(config)
+        save(config)
+    print("Settings saved. Restart Model Dock to apply; existing requests are interrupted by a restart.")
+
+
+def remove(ident):
+    with locked():
+        config = load()
+        remaining = [m for m in config["models"] if m["id"] != ident]
+        if len(remaining) == len(config["models"]):
+            raise ValueError("Unknown model")
+        if not remaining:
+            raise ValueError("Keep at least one model registered; stop/uninstall the service to remove the last one")
+        config["models"] = remaining
+        render(config)
+        save(config)
+    print("Removed from configuration; model file retained. Restart to apply.")
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(4 * 1024 * 1024):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def fetch(args):
+    catalog = json.loads((ROOT / "models.json").read_text())
+    if args.starter:
+        spec = catalog[args.starter]
+    else:
+        if not args.repository or not args.file:
+            raise ValueError("Choose --starter or --repository and --file")
+        repo = args.repository
+        if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+            raise ValueError("Invalid Hugging Face repository")
+        ref = urllib.parse.quote(args.revision, safe="")
+        with urllib.request.urlopen(f"https://huggingface.co/api/models/{repo}/revision/{ref}?blobs=true", timeout=30) as reply:
+            metadata = json.load(reply)
+        file = next((s for s in metadata["siblings"] if s["rfilename"] == args.file), None)
+        if not file or not file.get("lfs", {}).get("sha256"):
+            raise ValueError("Selected file needs published LFS SHA-256 metadata")
+        spec = {"repository": repo, "revision": metadata["sha"], "file": args.file,
+                "sha256": file["lfs"]["sha256"], "bytes": file["size"]}
+    if not re.fullmatch(r"[a-f0-9]{40}", spec["revision"]) or not re.fullmatch(r"[a-f0-9]{64}", spec["sha256"]):
+        raise ValueError("Download requires a pinned commit and SHA-256")
+    target_dir = Path(args.directory).expanduser() if args.directory else DATA
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / Path(spec["file"]).name
+    with locked():
+        if target.exists():
+            if digest(target) != spec["sha256"]:
+                raise ValueError("Existing file has a different digest; keep it or remove it explicitly")
+        else:
+            if shutil.disk_usage(target_dir).free < spec["bytes"] + 512 * 1024**2:
+                raise ValueError("Not enough disk space (including 512 MiB reserve)")
+            url = "https://huggingface.co/{}/resolve/{}/{}".format(
+                spec["repository"], spec["revision"], urllib.parse.quote(spec["file"], safe="/"))
+            fd, temp = tempfile.mkstemp(prefix=".download-", dir=target_dir)
+            try:
+                count = 0
+                print(f"Downloading {spec['file']} ({spec['bytes'] / 2**20:.0f} MiB)…", file=sys.stderr)
+                with os.fdopen(fd, "wb") as stream, urllib.request.urlopen(url, timeout=60) as reply:
+                    while chunk := reply.read(4 * 1024 * 1024):
+                        count += len(chunk)
+                        if count > spec["bytes"]:
+                            raise ValueError("Download exceeds published size")
+                        stream.write(chunk)
+                if count != spec["bytes"] or digest(Path(temp)) != spec["sha256"]:
+                    raise ValueError("Model download failed size/SHA-256 verification")
+                with open(temp, "rb") as stream:
+                    if stream.read(4) != b"GGUF":
+                        raise ValueError("Downloaded file is not GGUF")
+                os.replace(temp, target)
+            finally:
+                if os.path.exists(temp):
+                    os.unlink(temp)
+        atomic(target.with_suffix(target.suffix + ".source.json"), json.dumps(spec, indent=2) + "\n")
+    print(target)
+    return target
+
+
+def credentials(config=None):
+    config = config or load()
+    key_path = CONFIG / "api-key"
+    if key_path.is_symlink() or key_path.stat().st_mode & 0o077:
+        raise ValueError("API key file must be private")
+    return f"http://127.0.0.1:{config['port']}", key_path.read_text().strip()
+
+
+def api(path, body=None, authenticate=True, timeout=180):
+    base, key = credentials()
+    headers = {"Content-Type": "application/json"}
+    if authenticate:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
+                                 headers=headers)
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def status():
+    config = load()
+    value = {"configured": bool(config["models"]), "active": False, "ready": False,
+             "endpoint": f"http://127.0.0.1:{config['port']}/v1", "models": config["models"],
+             "max_loaded": config["max_loaded"], "key_file": str(CONFIG / "api-key"),
+             "autostart": False, "state": "stopped", "benchmark": None, "needs_restart": False}
+    applied = STATE / "applied.json"
+    if applied.exists():
+        value["needs_restart"] = json.loads(applied.read_text()) != config
+    if shutil.which("systemctl"):
+        value["active"] = run(["systemctl", "--user", "is-active", "--quiet", UNIT], check=False).returncode == 0
+        value["autostart"] = run(["systemctl", "--user", "is-enabled", "--quiet", UNIT], check=False).returncode == 0
+    if value["active"]:
+        value["state"] = "starting"
+        try:
+            with api("/v1/models", timeout=2) as reply:
+                served = json.load(reply)
+            value["served_models"] = [{"id": m["id"], "state": m.get("status", {}).get("value", "unknown")}
+                                      for m in served.get("data", [])]
+            for model in value["models"]:
+                model["state"] = next((m["state"] for m in value["served_models"] if m["id"] == model["id"]), "unloaded")
+            value.update(ready=True, state="ready")
+        except (OSError, ValueError):
+            pass
+    report = STATE / "benchmark.json"
+    if report.exists():
+        value["benchmark"] = json.loads(report.read_text())
+    return value
+
+
+def service(action, autostart=False):
+    with locked():
+        config = load()
+        if not config["models"]:
+            raise ValueError("No models registered. Run setup first")
+        if action in ("start", "restart"):
+            if action == "start" and status()["active"]:
+                if autostart:
+                    run(["systemctl", "--user", "enable", UNIT])
+                print("Already running; restart explicitly to apply configuration changes")
+                return
+            render(config)
+        if autostart:
+            run(["systemctl", "--user", "enable", UNIT])
+        run(["systemctl", "--user", action, UNIT])
+    if action != "stop":
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if status()["ready"]:
+                atomic(STATE / "applied.json", json.dumps(config, sort_keys=True) + "\n")
+                print("Ready: " + status()["endpoint"])
+                return
+            time.sleep(0.5)
+        raise ValueError(f"Router not ready. Inspect journalctl --user -u {UNIT}")
+    print("Stopped. Use autostart off to also disable automatic startup.")
+
+
+def infer(model, prompt, cache=True, tokens=64, synthetic=False):
+    started = time.monotonic()
+    first = visible = None
+    output = ""
+    usage = {}
+    timings = {}
+    system = "You are a concise assistant."
+    if synthetic:
+        system += " " + ("This is a public synthetic latency test. " * 90)
+    body = {"model": model, "messages": [{"role": "system", "content": system},
+        {"role": "user", "content": prompt}], "stream": True, "max_tokens": tokens,
+        "temperature": 0, "seed": 7, "cache_prompt": cache,
+        "stream_options": {"include_usage": True}, "chat_template_kwargs": {"enable_thinking": False}}
+    with api("/v1/chat/completions", body) as reply:
+        for line in reply:
+            if not line.startswith(b"data: "):
+                continue
+            if line.strip() == b"data: [DONE]":
+                break
+            chunk = json.loads(line[6:])
+            if chunk.get("error"):
+                raise ValueError("Inference rejected: " + str(chunk["error"].get("type", "runtime error")))
+            usage = chunk.get("usage") or usage
+            timings = chunk.get("timings") or timings
+            for choice in chunk.get("choices", []):
+                delta = choice.get("delta", {})
+                text = delta.get("content") or ""
+                if (text or delta.get("reasoning_content")) and first is None:
+                    first = time.monotonic() - started
+                if text:
+                    if visible is None:
+                        visible = time.monotonic() - started
+                    output += text
+    elapsed = time.monotonic() - started
+    if not output.strip():
+        raise ValueError("Model produced no visible answer within the output budget")
+    return {"model": model, "ttft_seconds": round(first, 4) if first is not None else None,
+            "visible_ttft_seconds": round(visible, 4) if visible is not None else None,
+            "total_seconds": round(elapsed, 4), "completion_tokens": usage.get("completion_tokens"),
+            "timings": timings, "answer": output}
+
+
+def benchmark(args):
+    config = load()
+    model = args.model or config["models"][0]["id"]
+    prompt = "List the integers from one to ten, separated by commas. No explanation."
+    runs = []
+    for label, cache in (("uncached", False), ("warm_prefix", True), ("warm_prefix_repeat", True)):
+        result = infer(model, prompt, cache, synthetic=True)
+        result.pop("answer")
+        runs.append({"scenario": label, **result})
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.clients) as pool:
+        concurrent_runs = list(pool.map(lambda n: infer(model, prompt + f" Test {n}.", True, synthetic=True), range(args.clients)))
+    for result in concurrent_runs:
+        result.pop("answer")
+        runs.append({"scenario": "concurrent", **result})
+    report = {"created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "model": model, "clients": args.clients,
+              "settings": next((m for m in config["models"] if m["id"] == model), {}),
+              "notes": "Synthetic ~800-token common prefix; first run may include model loading. Not a model-quality evaluation or a clean KV-cache reset.",
+              "runs": runs}
+    # Local reports contain paths; sanitize before publishing.
+    atomic(STATE / "benchmark.json", json.dumps(report, indent=2) + "\n")
+    emit(report)
+
+
+def check():
+    with api("/v1/models") as reply:
+        models = [m["id"] for m in json.load(reply).get("data", [])]
+    protected = []
+    for path, body in (("/v1/models", None), ("/v1/chat/completions", {}),
+                       ("/v1/responses", {}), ("/models/load", {})):
+        try:
+            with api(path, body, authenticate=False):
+                pass
+        except urllib.error.HTTPError as error:
+            code = error.code
+            error.close()
+            if code != 401:
+                raise ValueError(f"Unexpected unauthenticated response from {path}: {code}") from None
+        else:
+            raise ValueError(f"Endpoint accepted an unauthenticated request: {path}")
+        protected.append(path)
+    emit({"authenticated_models": models, "unauthenticated_status": 401,
+          "protected_routes_checked": protected,
+          "binding": "127.0.0.1 (SSH tunnel for remote clients)"})
+
+
+def install():
+    links = [Path.home() / ".local/bin/omarchy-model-dock"]
+    links += [Path.home() / part / "skills/omarchy-model-dock" for part in (".agents", ".claude", ".codex")]
+    for link in links:
+        target = ROOT / "model-dock" if link.name == "omarchy-model-dock" and link.parent.name == "bin" else ROOT
+        if link.is_symlink() and link.resolve() == target:
+            continue
+        if link.exists() or link.is_symlink():
+            raise ValueError(f"Preserving an existing entry: {link}")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    print("Installed omarchy-model-dock and the agent skill. No root changes.")
+
+
+def client(args):
+    config = load()
+    model = next((m for m in config["models"] if m["id"] == args.model), None)
+    if not model:
+        raise ValueError("Choose a registered model")
+    if model["context"] <= 4096:
+        raise ValueError("Agent clients need more context. Tune this model to at least 8192 per slot, restart and test first")
+    directory = STATE / "clients" / f"{args.kind}-{args.model}"
+    base = f"http://127.0.0.1:{config['port']}/v1"
+    key = CONFIG / "api-key"
+    if args.kind == "pi":
+        meta = {"id": args.model, "name": "Model Dock / " + args.model, "input": ["text"],
+                "reasoning": False, "contextWindow": model["context"], "maxTokens": 512,
+                "compat": {"maxTokensField": "max_tokens", "supportsDeveloperRole": False},
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}
+        if args.model.lower().startswith("qwen3"):
+            meta["samplingParams"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        provider = {"providers": {"model-dock": {"baseUrl": base, "api": "openai-completions",
+                      "apiKey": "!cat " + shlex.quote(str(key)), "models": [meta]}}}
+        atomic(directory / "models.json", json.dumps(provider, indent=2) + "\n")
+        command = ["pi", "--provider", "model-dock", "--model", args.model]
+        environment = {"PI_CODING_AGENT_DIR": str(directory)}
+    else:
+        # A separate home avoids changing the owner's default provider or credentials.
+        text = f'model = {json.dumps(args.model)}\nmodel_provider = "model-dock"\nmodel_context_window = {model["context"]}\n\n'
+        text += '[model_providers.model-dock]\nname = "Model Dock"\n'
+        text += f'base_url = {json.dumps(base)}\nwire_api = "responses"\nenv_key = "MODEL_DOCK_API_KEY"\nsupports_websockets = false\n'
+        atomic(directory / "config.toml", text)
+        command = ["codex"]
+        environment = {"CODEX_HOME": str(directory)}
+    launcher = "#!/usr/bin/env python3\nimport os, sys\nfrom pathlib import Path\n"
+    launcher += f"env = os.environ.copy()\nenv.update({environment!r})\n"
+    if args.kind == "codex":
+        launcher += f"env['MODEL_DOCK_API_KEY'] = Path({str(key)!r}).read_text().strip()\n"
+    launcher += f"argv = {command!r} + sys.argv[1:]\nos.execvpe(argv[0], argv, env)\n"
+    atomic(directory / "launch", launcher, mode=0o700)
+    emit({"client": args.kind, "model": args.model, "launcher": str(directory / "launch"),
+          "note": "Separate local client profile; model quality and tool use still need task-specific validation"})
+
+
+def build(args):
+    if platform.system() != "Linux":
+        raise ValueError("Build automation currently targets Linux; inspect reports macOS options")
+    for executable in ("git", "cmake", "c++"):
+        if not shutil.which(executable):
+            raise ValueError(f"Missing {executable}. Ask the owner for package-install access")
+    base = Path.home() / ".local/opt" / f"model-dock-llama-{args.backend}"
+    if base.exists():
+        raise ValueError(f"Build directory already exists; preserving it: {base}")
+    base.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "clone", "--filter=blob:none", "https://github.com/ggml-org/llama.cpp.git", str(base)], check=True)
+    subprocess.run(["git", "-C", str(base), "checkout", "--detach", SOURCE_REVISION], check=True)
+    opts = {"vulkan": "GGML_VULKAN", "cuda": "GGML_CUDA", "hip": "GGML_HIP", "cpu": None}
+    command = ["cmake", "-S", str(base), "-B", str(base / "build"), "-DCMAKE_BUILD_TYPE=Release",
+               "-DLLAMA_CURL=OFF"]
+    if opts[args.backend]:
+        command += [f"-D{opts[args.backend]}=ON"]
+    subprocess.run(command, check=True)
+    subprocess.run(["cmake", "--build", str(base / "build"), "--target", "llama-server", "-j", str(min(8, os.cpu_count() or 2))], check=True)
+    target = base / "bin"
+    target.mkdir()
+    (target / "llama-server").symlink_to(base / "build/bin/llama-server")
+    print(target / "llama-server")
+
+
+def setup():
+    install()
+    emit(probe())
+    if not sys.stdin.isatty():
+        raise ValueError("setup is interactive; agents use fetch/add/start/check/benchmark")
+    binary, device = select_runtime()
+    print(f"Runtime: {binary}\nDevice: {device}\n1: Qwen3 0.6B, 610 MiB\n2: Qwen3 1.7B, 1750 MiB")
+    choice = input("Download a small starter for setup testing? [1/2, Enter cancels] ").strip()
+    if choice not in ("1", "2"):
+        return
+    starter = "qwen3-0.6b" if choice == "1" else "qwen3-1.7b"
+    if any(m["id"] == starter for m in load()["models"]):
+        print("This starter is already configured. Ask an agent to find another model, or use fetch/add.")
+        return
+    file = fetch(argparse.Namespace(starter=starter, directory=None))
+    add(argparse.Namespace(file=str(file), name=starter, server=binary, device=device,
+                           context=4096, slots=2, cache="f16"))
+    if status()["active"]:
+        if input("Restart server to apply this model? This interrupts active requests. [y/N] ").lower() != "y":
+            return
+        service("restart")
+    else:
+        service("start")
+    check()
+    benchmark(argparse.Namespace(model=starter, clients=2))
+    print("Ready. Copy the endpoint from the panel; ask an agent to choose a stronger model for your work.")
+
+
+def bounded(low, high):
+    def parse(value):
+        number = int(value)
+        if not low <= number <= high:
+            raise argparse.ArgumentTypeError(f"Expected {low}–{high}")
+        return number
+    return parse
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    for name in ("inspect", "status", "install", "setup", "check", "stop"):
+        sub.add_parser(name)
+    for name in ("load", "unload", "remove"):
+        sub.add_parser(name).add_argument("model", type=validate_id)
+    download = sub.add_parser("fetch", help="Download a pinned GGUF and verify SHA-256")
+    download.add_argument("--starter", choices=json.loads((ROOT / "models.json").read_text()))
+    download.add_argument("--repository")
+    download.add_argument("--file")
+    download.add_argument("--revision", default="main")
+    download.add_argument("--directory")
+    register = sub.add_parser("add")
+    register.add_argument("--file", required=True)
+    register.add_argument("--name")
+    register.add_argument("--server")
+    register.add_argument("--device", default="auto")
+    register.add_argument("--context", type=bounded(512, 131072), default=4096, help="tokens per slot")
+    register.add_argument("--slots", type=bounded(1, 16), default=2)
+    register.add_argument("--cache", choices=("f16", "q8_0", "q4_0"), default="f16")
+    tuning = sub.add_parser("tune")
+    tuning.add_argument("--model")
+    tuning.add_argument("--context", type=bounded(512, 131072))
+    tuning.add_argument("--slots", type=bounded(1, 16))
+    tuning.add_argument("--cache", choices=("f16", "q8_0", "q4_0"))
+    tuning.add_argument("--max-loaded", type=bounded(1, 8))
+    tuning.add_argument("--port", type=bounded(1024, 65535))
+    for name in ("start", "restart"):
+        sub.add_parser(name).add_argument("--autostart", action="store_true")
+    sub.add_parser("autostart").add_argument("value", choices=("on", "off"))
+    bench = sub.add_parser("benchmark")
+    bench.add_argument("--model")
+    bench.add_argument("--clients", type=bounded(1, 16), default=2)
+    request = sub.add_parser("request")
+    request.add_argument("--model", required=True)
+    request.add_argument("--prompt", required=True)
+    request.add_argument("--tokens", type=bounded(1, 8192), default=256)
+    bootstrap = sub.add_parser("build")
+    bootstrap.add_argument("--backend", choices=("vulkan", "cuda", "hip", "cpu"), required=True)
+    consumer = sub.add_parser("client", help="Create a separate Pi/Codex profile without changing defaults")
+    consumer.add_argument("kind", choices=("pi", "codex"))
+    consumer.add_argument("--model", required=True)
+    tunnel = sub.add_parser("tunnel", help="Run on a client: forward local port to the server over SSH")
+    tunnel.add_argument("host")
+    tunnel.add_argument("--local-port", type=bounded(1024, 65535), default=8090)
+    tunnel.add_argument("--remote-port", type=bounded(1024, 65535), default=8090)
+    args = parser.parse_args()
+    if args.action == "inspect": emit(probe())
+    elif args.action == "status": emit(status())
+    elif args.action == "install": install()
+    elif args.action == "setup": setup()
+    elif args.action == "fetch": fetch(args)
+    elif args.action == "add": add(args)
+    elif args.action == "tune": tune(args)
+    elif args.action == "remove": remove(args.model)
+    elif args.action in ("start", "restart", "stop"): service(args.action, getattr(args, "autostart", False))
+    elif args.action == "autostart":
+        run(["systemctl", "--user", "enable" if args.value == "on" else "disable", UNIT])
+        print("Start at user-manager startup: " + args.value)
+    elif args.action == "check": check()
+    elif args.action in ("load", "unload"):
+        if args.model not in [m["id"] for m in load()["models"]]:
+            raise ValueError("Unknown registered model")
+        if args.action == "load":
+            # Normal inference uses the router's native LRU/queue policy. Explicit
+            # /models/load can reject a full model limit instead of evicting idle workers.
+            with api("/v1/chat/completions", {"model": args.model,
+                     "messages": [{"role": "user", "content": "Reply OK."}],
+                     "max_tokens": 1, "chat_template_kwargs": {"enable_thinking": False}}) as reply:
+                result = json.load(reply)
+            if "choices" not in result:
+                raise ValueError("Runtime did not accept the warm-up request")
+        else:
+            with api("/models/unload", {"model": args.model}) as reply:
+                result = json.load(reply)
+            if not result.get("success"):
+                raise ValueError("Runtime did not accept the unload action")
+        print(f"{args.model}: {args.action} complete")
+    elif args.action == "benchmark": benchmark(args)
+    elif args.action == "request": print(infer(args.model, args.prompt, tokens=args.tokens)["answer"])
+    elif args.action == "build": build(args)
+    elif args.action == "client": client(args)
+    elif args.action == "tunnel":
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@:-]*", args.host):
+            raise ValueError("Expected an SSH hostname or alias")
+        subprocess.run(["ssh", "-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
+                        "-L", f"127.0.0.1:{args.local_port}:127.0.0.1:{args.remote_port}", args.host], check=True)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, OSError, KeyError, subprocess.SubprocessError) as error:
+        # Never include request headers, environment variables or secret file contents.
+        print(f"Model Dock: {error}", file=sys.stderr)
+        raise SystemExit(1)

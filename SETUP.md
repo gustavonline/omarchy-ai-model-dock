@@ -1,91 +1,122 @@
-# Coding-agent setup contract
+# Model Dock setup
 
-Use this workflow when installing the plugin or adding a model. Keep the runtime
-architecture to three layers:
+Model Dock provisions one maintained llama.cpp router as a **systemd user**
+service. Each registered GGUF gets a preset; clients choose its model ID. Models
+load on demand. No Docker, Python packages or root service are needed.
 
-1. A GGUF model, with its downloaded filename unchanged, and any matching draft model.
-2. One model-agnostic systemd **user** runtime slot containing the llama-server command.
-3. One `name`/`service` entry in `~/.config/omarchy/local-ai.toml`.
+The current automated serving target is Linux with systemd. The initial hardware
+validation is AMD Ryzen AI Max+ 395 / Radeon 8060S (Strix Halo), using Vulkan.
+Other platforms are detected but must be measured before claiming equivalent
+support. [Mac Studio and MLX tracking](https://github.com/gustavonline/omarchy-llama-cpp-local-ai/issues/13).
 
-## Add or change a profile
+## Install
 
-1. Inspect the machine, llama.cpp build, accelerator, available memory, model
-   files, and existing profile services.
-2. Choose launch arguments appropriate for that machine and model. Do not copy
-   another model's context, cache, GPU, or speculative-decoding settings without
-   verifying compatibility.
-3. Create one model-agnostic runtime slot per actual model, for example
-   `omarchy-local-ai-runtime-1.service`. Put that model's context, cache, GPU,
-   and optional draft settings in its `ExecStart`. Do not create separate Local
-   AI profiles merely for Q4/Q8/BF16 variants of the same model.
-4. Run `systemctl --user daemon-reload`, start the new service directly, wait
-   for the API to become ready, make a small inference request, then stop it.
-5. Add only its friendly name and unit name to `local-ai.toml`. Change friendly
-   display names, add/remove profiles, and change services in the advanced runtime
-   config opened from the Local AI panel.
-6. Run `local-ai-control doctor` and `test.sh`.
-7. Leave the service disabled. The panel must start it only on demand.
-
-## Minimal service shape
-
-Use this only as a structural example. Replace every model path and choose
-context, accelerator, cache, and offload settings from measurements on the target
-machine:
-
-```ini
-[Unit]
-Description=Local AI llama.cpp runtime slot 1
-Conflicts=omarchy-local-ai-runtime-2.service omarchy-local-ai-runtime-3.service
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/llama-server \
-  --model %h/.local/share/models/example.gguf \
-  --host 127.0.0.1 \
-  --port 8080 \
-  --ctx-size 8192
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=default.target
+```bash
+omarchy plugin add https://github.com/gustavonline/omarchy-llama-cpp-local-ai --enable --yes
 ```
 
-Do not add secrets to the plugin TOML. If the service uses `--api-key`, keep the
-credential in the service or a protected environment file and configure clients
-separately. The panel intentionally copies only the endpoint.
+Click **Set up Model Dock** in the right-hand bar panel. This opens a short
+terminal setup, links the CLI and agent skill, offers two small verified starter
+models, starts the router and runs authentication and inference checks. Or ask
+an agent to read the repository's root `SKILL.md` and do the setup.
 
-The service is the source of truth. The plugin reads `--model`,
-`--spec-draft-model`, `--ctx-size`, `--device`, `--host`, and `--port` from its
-`ExecStart`; it does not generate, rewrite, or own services.
+Find the plugin by its manifest ID, not a hardcoded checkout folder name. New
+installs normally use `~/.config/omarchy/plugins/io.github.gustavonline.local-ai/`;
+older clones may still be named `gustav.local-ai`.
 
-Harnesses such as Pi or Codex are separate clients. Configure them against the
-endpoint shown by the panel after the runtime has been verified.
+```bash
+cd /path/to/plugin
+./model-dock install
+./model-dock inspect
+```
 
-## Optional Always-on Assistant contract
+A working llama-server is reused. Detection checks its actual device list.
+Without a compatible binary, build one from a pinned upstream commit:
 
-The assistant is a fourth, optional consumer of the endpoint, not another
-runtime profile and not another Omarchy plugin. Configure it from the
-**Always-on Assistant** section in the Local AI dropdown.
+```bash
+./model-dock build --backend vulkan
+```
 
-1. Install Pi and start the desired light-model endpoint.
-2. Open **Assistant settings**. Choose one of the locally discovered models; the
-   smallest available model is identified as the fastest option.
-3. Choose the suggestion frequency, preferred installed harness, and whether
-   filtered window titles may be shared with the local model, then save.
-4. If the endpoint should be started automatically, use **Open advanced config**
-   to configure a fixed
-   `runtime.start_command` argv that invokes `local-ai-control start PROFILE`.
-5. Keep screenshots disabled. Adjust privacy deny rules before widening shared
-   window metadata.
-6. Optionally keep a fixed argv for custom handoffs or Pi Worker flags. An
-   explicit Continue click creates a private harness-neutral session, copies
-   its `SESSION.md` path, and opens the selected harness. Codex uses its desktop
-   app when installed; CLI harnesses receive the bare session path as their
-   final argument. The harness is never a tool granted to the light model.
-7. Run `local-ai-assistant doctor --online`, then enable the assistant and use the
-   real-work acceptance guide.
+Build dependencies on Arch/Omarchy include `base-devel`, `cmake`, and for Vulkan
+`vulkan-headers`, `vulkan-icd-loader`, `shaderc`, plus the correct GPU driver.
+CUDA/HIP need the vendor's supported toolkit and compatible GPU. Missing system
+packages require ordinary owner-approved package installation; the plugin does
+not install them silently. Builds live in `~/.local/opt/model-dock-llama-BACKEND/`.
+A failed build directory is preserved for diagnosis instead of overwritten.
 
-The assistant systemd service owns only its observer, state, isolated Pi catalog,
-and suggestion UI. Disabling it must not stop or rewrite the shared model
-runtime.
+## Agent/noninteractive setup
+
+```bash
+./model-dock fetch --starter qwen3-0.6b
+./model-dock add --file ~/.local/share/models/model-dock/Qwen3-0.6B-Q8_0.gguf \
+  --name qwen3-0.6b --context 4096 --slots 2
+./model-dock start
+./model-dock check
+./model-dock request --model qwen3-0.6b --prompt 'Say hello in Danish.'
+./model-dock benchmark --model qwen3-0.6b --clients 2
+```
+
+The starters are small, publisher-provided Q8 GGUFs, pinned by commit, size and
+SHA-256. They establish compatibility and latency; they are not an endorsement
+as the newest or strongest model. `fetch --repository OWNER/REPO --file FILE.gguf`
+resolves a requested model to a commit and published SHA-256. Check its license
+and model card first. Split files must all be downloaded; register the first one.
+
+## Context, cache and concurrency
+
+`--context` means tokens **per slot**. With 4096 context and 2 slots, llama.cpp
+receives 8192 total context. Both slots share one model. Continuous batching
+allows overlapping inference. Prefix KV reuse avoids evaluating an unchanged
+prompt prefix again; RAM prompt-cache storage is bounded to 256 MiB per model.
+
+```bash
+./model-dock tune --model qwen3-0.6b --context 8192 --slots 2 --cache q8_0
+./model-dock tune --max-loaded 2
+./model-dock restart
+```
+
+Restart interrupts requests. Adding/tuning does not restart automatically.
+More slots or larger context uses more memory; quantized KV may change quality
+and backend compatibility. Start with f16, measure a realistic prompt, and only
+then compare q8_0/q4_0. Do not copy speculative decoding or draft-model settings
+across architectures without verification.
+
+The router's model count is not a strict memory budget. It unloads idle models
+when the configured count is reached; loading a new model may wait or fail when
+all capacity is busy. Keep enough memory for the desktop, other services and KV
+cache. There is no cross-machine load balancing, tenant isolation, billing or
+per-user quota system. Put such requirements in a separate gateway if needed.
+
+## Service lifecycle
+
+- `start` / `stop`: start/stop this router and its worker processes only.
+- `load MODEL` / `unload MODEL`: prepare with a one-token public warm-up/release a model.
+- `remove MODEL`: unregister an extra model, retaining its downloaded file.
+- `start --autostart`: also start with the user manager after future boots/logins.
+- `autostart off`: disable that behavior; does not stop a running server.
+- `status`: JSON with readiness, models, endpoint and latest latency report.
+- `check`: authenticated discovery plus rejection tests for models, chat, Responses and model loading.
+
+For startup before login, inspect `loginctl show-user "$USER" -p Linger`.
+Enabling linger is an explicit owner/system decision. Boot disk encryption,
+lid policy, AC/network restrictions and OS updates are outside this plugin.
+
+## Existing Local AI installs and upgrades
+
+The plugin ID and `local-ai-control`, `local-ai-assistant`, existing TOML profiles
+and services remain supported. Existing profiles are accessible through the
+panel's **Existing runtime profiles** disclosure. They are not automatically
+imported, stopped, renamed or rewritten by Model Dock. Avoid running a large
+legacy profile alongside the dock without checking memory pressure.
+
+Managed configuration, model files, reports and the key live outside the checkout.
+`omarchy plugin update` therefore updates code without replacing these files.
+`./model-dock install` is idempotent and keeps unrelated skill/CLI entries intact.
+No elevated update hook is needed. Keep the stable plugin directory in place;
+if moving it, re-link its user-owned CLI/skills deliberately.
+
+To remove the plugin, first stop the service and disable autostart. Then remove
+`omarchy-model-dock.service` from the user's systemd directory and run
+`systemctl --user daemon-reload`. Remove only CLI/skill symlinks that point to
+this checkout. Configuration, keys, reports and downloaded models are retained
+until explicitly deleted by the owner.

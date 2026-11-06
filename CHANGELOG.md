@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0 — Omarchy Model Dock
+
+- Add a hardware/device probe, pinned GGUF downloads and a user-owned llama.cpp
+  router with per-model context, slots and KV-cache settings.
+- Add authenticated loopback endpoints, SSH forwarding and streaming latency tests.
+- Keep model routing/batching in llama.cpp; support multiple resident models with
+  an explicit conservative limit.
+- Add a native numbered model hotbar, keyboard selection and a loading pulse in the right-hand panel.
+- Bundle a root agent skill and idempotent CLI/skill installation.
+- Preserve legacy runtime profiles and the optional local assistant.
+- Document measured Strix Halo/Vulkan behavior and unverified Apple/MLX work.
+
 ## 0.10.0 — 2026-09-02
 
 - Consolidate runtime and Assistant settings in `local-ai.toml`, preserve Assistant settings when renaming profiles, and align docs and tests with the shared configuration and current UI.

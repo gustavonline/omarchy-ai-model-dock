@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 Panel {
@@ -12,14 +13,24 @@ Panel {
   ipcTarget: "io.github.gustavonline.local-ai"
   manageIpc: false
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
-  readonly property color accent: Color.accent
-  readonly property color urgent: bar ? bar.urgent : Color.urgent
+  readonly property color accent: Commons.Color.accent
+  readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string controlPath: decodeURIComponent(
     String(Qt.resolvedUrl("local-ai-control")).replace(/^file:\/\//, "")
   )
+  readonly property string dockPath: decodeURIComponent(
+    String(Qt.resolvedUrl("model-dock")).replace(/^file:\/\//, "")
+  )
+  property var dock: ({configured: false, active: false, ready: false, models: [], state: "stopped"})
+  property bool showLegacy: false
+  property string selectedDockModel: ""
+  property bool loadAfterDockStart: false
+  property string copyLabel: "API URL copied"
+  readonly property bool dockRunning: dock.active === true
+  readonly property string dockEndpoint: String(dock.endpoint || "")
   readonly property string assistantControlPath: decodeURIComponent(
     String(Qt.resolvedUrl("local-ai-assistant")).replace(/^file:\/\//, "")
   )
@@ -152,6 +163,7 @@ Panel {
   implicitHeight: button.implicitHeight
 
   function refresh() {
+    if (!dockStatusProcess.running) dockStatusProcess.running = true
     if (!statusProcess.running) statusProcess.running = true
     if (!assistantStatusProcess.running) assistantStatusProcess.running = true
   }
@@ -185,9 +197,54 @@ Panel {
     actionProcess.running = true
   }
 
-  function copyEndpoint() {
-    if (!status.endpoint || copyProcess.running) return
-    copyProcess.command = ["wl-copy", String(status.endpoint)]
+  function selectDockModel(index) {
+    var model = (dock.models || [])[index]
+    if (!model || busy) return
+    selectedDockModel = model.id
+    if (dock.ready) runDockAction("load", model.id)
+    else {
+      loadAfterDockStart = true
+      runDockAction("start")
+    }
+  }
+
+  function moveDockSelection(delta) {
+    var models = dock.models || []
+    if (models.length === 0) return
+    var index = models.findIndex(function(model) { return model.id === selectedDockModel })
+    selectedDockModel = models[(index + delta + models.length) % models.length].id
+  }
+
+  function copyDockModel() {
+    if (!selectedDockModel || copyProcess.running) return
+    copyLabel = "Model ID copied"
+    copyProcess.command = ["wl-copy", selectedDockModel]
+    copyProcess.running = true
+  }
+
+  function runDockAction(action, model) {
+    if (actionProcess.running) return
+    busy = true
+    pendingAction = action
+    pendingProfile = ""
+    clearFeedback()
+    actionProcess.command = [dockPath, action]
+    if (model) actionProcess.command.push(model)
+    actionProcess.running = true
+  }
+
+  function openDockSetup() {
+    if (dockSetupProcess.running) return
+    dockSetupProcess.command = ["omarchy", "launch", "terminal", "--", "bash", "-c",
+      '"$1" setup; printf "\\nPress Enter to close"; read -r', "model-dock", dockPath]
+    dockSetupProcess.running = true
+  }
+
+  function copyEndpoint(legacy) {
+    var endpoint = dock.configured && !legacy ? dockEndpoint : String(status.endpoint || "")
+    if (!endpoint || copyProcess.running) return
+    copyLabel = dock.configured && !legacy ? "API URL copied" : "Endpoint copied"
+    copyProcess.command = ["wl-copy", endpoint]
     copyProcess.running = true
   }
 
@@ -535,6 +592,32 @@ Panel {
   }
 
   Process {
+    id: dockSetupProcess
+    onExited: root.refresh()
+  }
+
+  Process {
+    id: dockStatusProcess
+    command: [root.dockPath, "status"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          root.dock = JSON.parse(String(text || "{}"))
+          var models = root.dock.models || []
+          if (!models.some(function(model) { return model.id === root.selectedDockModel }))
+            root.selectedDockModel = models.length ? models[0].id : ""
+        }
+        catch (e) { root.showError("Could not read Model Dock status") }
+      }
+    }
+    stderr: StdioCollector { id: dockStatusError; waitForEnd: true }
+    onExited: function(code) {
+      if (code !== 0) root.showError(String(dockStatusError.text || "Model Dock needs attention").trim().slice(0, 180))
+    }
+  }
+
+  Process {
     id: statusProcess
     running: false
     command: [root.controlPath, "--config", root.configFile, "status"]
@@ -566,19 +649,22 @@ Panel {
     onExited: function(exitCode) {
       root.busy = false
       if (exitCode === 0) {
-        var successMessage = "Runtime updated"
+        var successMessage = root.pendingAction === "load" ? "Model loaded" : "Runtime updated"
         if (root.pendingAction === "start") {
-          successMessage = root.pendingProfile !== "" ? root.pendingProfile + " started" : "Local AI started"
-        } else if (root.pendingAction === "stop") successMessage = "Local AI stopped"
-        else if (root.pendingAction === "restart") successMessage = "Local AI restarted"
+          successMessage = root.pendingProfile !== "" ? root.pendingProfile + " started" : "Server started"
+        } else if (root.pendingAction === "stop") successMessage = "Server stopped"
+        else if (root.pendingAction === "restart") successMessage = "Server restarted"
         root.showTransientFeedback(successMessage)
       } else {
         var details = String(actionError.text || actionOutput.text || "Runtime action failed").trim()
         root.showError(details.length > 180 ? details.slice(0, 177) + "…" : details)
       }
+      var shouldLoad = exitCode === 0 && root.pendingAction === "start" && root.loadAfterDockStart
+      root.loadAfterDockStart = false
       root.pendingAction = ""
       root.pendingProfile = ""
       actionRefresh.restart()
+      if (shouldLoad) Qt.callLater(function() { root.runDockAction("load", root.selectedDockModel) })
     }
   }
 
@@ -586,7 +672,7 @@ Panel {
     id: copyProcess
     running: false
     onExited: function(exitCode) {
-      if (exitCode === 0) root.showTransientFeedback("Endpoint copied")
+      if (exitCode === 0) root.showTransientFeedback(root.copyLabel)
       else root.showError("Could not copy endpoint")
     }
   }
@@ -732,14 +818,26 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): string { root.refresh(); return "ok" }
-    function start(profile: string): string { root.runAction("start", profile); return "ok" }
-    function stop(): string { root.runAction("stop", ""); return "ok" }
-    function restart(): string { root.runAction("restart", ""); return "ok" }
+    function start(profile: string): string {
+      if (root.dock.configured && !profile) root.runDockAction("start")
+      else root.runAction("start", profile)
+      return "ok"
+    }
+    function stop(): string {
+      if (root.dock.configured) root.runDockAction("stop")
+      else root.runAction("stop", "")
+      return "ok"
+    }
+    function restart(): string {
+      if (root.dock.configured) root.runDockAction("restart")
+      else root.runAction("restart", "")
+      return "ok"
+    }
     function enableAssistant(): string { root.runAssistantAction("enable"); return "ok" }
     function disableAssistant(): string { root.runAssistantAction("disable"); return "ok" }
     function pauseAssistant(): string { root.runAssistantAction("pause"); return "ok" }
     function resumeAssistant(): string { root.runAssistantAction("resume"); return "ok" }
-    function status(): string { return root.stateLabel }
+    function status(): string { return root.dock.configured ? String(root.dock.state) : root.stateLabel }
   }
 
   Component {
@@ -786,26 +884,32 @@ Panel {
     tooltipText: root.voiceMode
       ? (root.dictationRecording ? "Local AI · Listening — release SUPER+A to send"
         : (root.assistantStatus.state === "thinking" ? "Local AI · Thinking…" : "Local AI · Transcribing…"))
-      : "Local AI · Runtime " + root.stateLabel + " · Assistant " + root.assistantStateLabel
-    active: root.running || (root.assistantActive && !root.assistantPaused)
+      : "Model Dock · " + (root.dock.configured ? root.dock.state : root.stateLabel)
+    active: root.dockRunning || root.running || (root.assistantActive && !root.assistantPaused)
     useActiveColor: false
 
     Rectangle {
       visible: !root.voiceMode
-        && (root.running || root.assistantEnabled || root.failed || root.assistantFailed)
-      width: root.running ? Style.space(5) : Style.space(4)
+        && (root.dockRunning || root.running || root.assistantEnabled || root.failed || root.assistantFailed)
+      width: root.dockRunning || root.running ? Style.space(5) : Style.space(4)
       height: width
       radius: width / 2
       anchors.right: parent.right
       anchors.bottom: parent.bottom
       anchors.rightMargin: Style.space(2)
       anchors.bottomMargin: Style.space(2)
-      color: root.failed || root.assistantFailed ? Color.urgent
+      color: root.failed || root.assistantFailed ? Commons.Color.urgent
         : (root.assistantPaused && !root.running ? root.dim : root.accent)
     }
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) root.runAction(root.running ? "stop" : "start", "")
-      else if (buttonCode === Qt.MiddleButton) root.runAction("restart", "")
+      if (buttonCode === Qt.RightButton) {
+        if (root.dock.configured) root.runDockAction(root.dockRunning ? "stop" : "start")
+        else root.runAction(root.running ? "stop" : "start", "")
+      }
+      else if (buttonCode === Qt.MiddleButton) {
+        if (root.dock.configured) root.runDockAction("restart")
+        else root.runAction("restart", "")
+      }
       else root.toggle()
     }
   }
@@ -828,7 +932,18 @@ Panel {
       anchors.fill: parent
       blocked: modelDropdown.popupOpen || harnessDropdown.popupOpen
         || sensitivityDropdown.popupOpen || appPicker.popupOpen
-      onActivateRequested: root.refresh()
+      onTextKey: function(text) {
+        if (!root.settingsPage && /^[1-9]$/.test(text)) root.selectDockModel(Number(text) - 1)
+      }
+      onMoveRequested: function(dx, dy) {
+        if (!root.settingsPage) root.moveDockSelection(dx || dy)
+      }
+      onActivateRequested: {
+        if (!root.settingsPage && root.dock.configured) {
+          var models = root.dock.models || []
+          root.selectDockModel(models.findIndex(function(model) { return model.id === root.selectedDockModel }))
+        } else root.refresh()
+      }
       onCloseRequested: root.close()
 
       WheelHandler {
@@ -874,7 +989,7 @@ Panel {
 
               Text {
                 width: parent.width
-                text: root.settingsPage ? "Assistant settings" : "Local AI"
+                text: root.settingsPage ? "Assistant settings" : "Model Dock"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title
@@ -885,8 +1000,7 @@ Panel {
               Text {
                 width: parent.width
                 visible: !root.settingsPage
-                text: (root.assistantEnabled ? "Assistant on" : "Assistant off")
-                  + " · " + (root.running ? "Runtime running" : "Runtime stopped")
+                text: root.dock.configured ? "LOCAL INFERENCE · " + String(root.dock.state).toUpperCase() : "Local models, ready to connect"
                 color: root.assistantEnabled ? root.accent : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -916,8 +1030,14 @@ Panel {
 
           PanelSeparator { width: parent.width; foreground: root.foreground }
 
-          Column {
+          ModelDockControls {
             visible: !root.settingsPage
+            width: parent.width
+            controller: root
+          }
+
+          Column {
+            visible: !root.settingsPage && root.showLegacy
             width: parent.width
             spacing: Style.space(10)
 
@@ -1080,7 +1200,7 @@ Panel {
                 fontFamily: root.fontFamily
                 fontSize: Style.font.bodySmall
                 verticalPadding: Style.spacing.controlPaddingY
-                onClicked: root.copyEndpoint()
+                onClicked: root.copyEndpoint(true)
               }
             }
 
@@ -1100,6 +1220,18 @@ Panel {
             visible: root.settingsPage
             width: parent.width
             spacing: Style.space(10)
+
+            Toggle {
+              width: parent.width
+              label: "Always-on Assistant"
+              description: root.assistantStateLabel
+              checked: root.assistantEnabled
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              enabled: root.assistantStatus.configured && !root.assistantBusy
+              onClicked: root.runAssistantAction(root.assistantEnabled ? "disable" : "enable")
+            }
 
             PanelSectionHeader {
               width: parent.width
@@ -1314,11 +1446,11 @@ Panel {
         + (root.bar && root.bar.position === "right" && root.hostWindow ? root.hostWindow.width : 0)
       anchors.bottomMargin: Style.gapsOut + Style.space(8)
         + (root.bar && root.bar.position === "bottom" && root.hostWindow ? root.hostWindow.height : 0)
-      color: Color.notifications.background
+      color: Commons.Color.notifications.background
       borderSpec: Border.surfaceSpec(
         "notifications",
         "border",
-        root.cornerToastIsError ? root.urgent : Color.notifications.border,
+        root.cornerToastIsError ? root.urgent : Commons.Color.notifications.border,
         Math.max(1, Style.space(2))
       )
       radius: Style.cornerRadius
@@ -1373,7 +1505,7 @@ Panel {
           Text {
             width: parent.width
             text: root.cornerToastTitle
-            color: Color.notifications.text
+            color: Commons.Color.notifications.text
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             font.bold: true
@@ -1384,7 +1516,7 @@ Panel {
             visible: root.cornerToastBody !== ""
             width: parent.width
             text: root.cornerToastBody
-            color: Qt.darker(Color.notifications.text, 1.28)
+            color: Qt.darker(Commons.Color.notifications.text, 1.28)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
@@ -1422,8 +1554,8 @@ Panel {
     BorderSurface {
       id: suggestionCard
       anchors.fill: parent
-      color: Color.notifications.background
-      borderSpec: Border.surfaceSpec("notifications", "border", Color.notifications.border, Math.max(1, Style.space(2)))
+      color: Commons.Color.notifications.background
+      borderSpec: Border.surfaceSpec("notifications", "border", Commons.Color.notifications.border, Math.max(1, Style.space(2)))
       radius: Style.cornerRadius
       clip: true
       opacity: root.suggestionPresented ? 1 : 0
@@ -1500,7 +1632,7 @@ Panel {
           Text {
             width: parent.width
             text: String(root.suggestion.title || "Suggested next step")
-            color: Color.notifications.text
+            color: Commons.Color.notifications.text
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
             font.bold: true
@@ -1512,7 +1644,7 @@ Panel {
           Text {
             width: parent.width
             text: "Context · " + String(root.suggestion.observation || "Active desktop context")
-            color: Qt.darker(Color.notifications.text, 1.4)
+            color: Qt.darker(Commons.Color.notifications.text, 1.4)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
@@ -1525,7 +1657,7 @@ Panel {
             width: parent.width
             text: String(root.suggestion.body || "")
               + ((root.suggestion || {}).streaming === true ? "  ▌" : "")
-            color: Qt.darker(Color.notifications.text, 1.15)
+            color: Qt.darker(Commons.Color.notifications.text, 1.15)
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
@@ -1544,7 +1676,7 @@ Panel {
               anchors.right: parent.right
               iconText: "󰆏"
               tooltipText: "Copy response"
-              foreground: Qt.darker(Color.notifications.text, 1.2)
+              foreground: Qt.darker(Commons.Color.notifications.text, 1.2)
               accent: root.accent
               fontFamily: root.fontFamily
               iconSize: Style.font.bodySmall
@@ -1561,7 +1693,7 @@ Panel {
             width: parent.width
             text: root.summonPrompt
             placeholderText: "What do you need?"
-            foreground: Color.notifications.text
+            foreground: Commons.Color.notifications.text
             accent: root.accent
             font.family: root.fontFamily
             maximumLength: 2000
@@ -1594,7 +1726,7 @@ Panel {
             width: parent.cellWidth
             text: root.dismissButtonLabel()
             bordered: true
-            foreground: Color.notifications.text
+            foreground: Commons.Color.notifications.text
             fontFamily: root.fontFamily
             fontSize: Style.font.bodySmall
             verticalPadding: Style.spacing.controlPaddingY
@@ -1628,7 +1760,7 @@ Panel {
             width: parent.cellWidth
             text: root.dismissButtonLabel()
             bordered: true
-            foreground: Color.notifications.text
+            foreground: Commons.Color.notifications.text
             fontFamily: root.fontFamily
             fontSize: Style.font.bodySmall
             verticalPadding: Style.spacing.controlPaddingY
