@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "io.github.gustavonline.local-ai",
-  "name": "Omarchy Model Dock",
-  "version": "0.11.1",
+  "name": "Omarchy AI Model Dock",
+  "version": "0.12.0",
   "author": "Gustav Andersen",
   "license": "MIT",
   "description": "Prepare, serve and connect local models with native Omarchy controls and an agent CLI.",
@@ -15,15 +15,14 @@
   },
   "barWidget": {
     "displayName": "Model Dock",
-    "description": "Local inference, authenticated endpoints and optional Assistant.",
+    "description": "Local models, private inference endpoints and agent setup.",
     "category": "AI",
     "aliases": [
       "model-dock",
       "local-models",
       "local-ai",
       "llama.cpp",
-      "inference",
-      "assistant"
+      "inference"
     ],
     "allowMultiple": false,
     "defaultSection": "right",

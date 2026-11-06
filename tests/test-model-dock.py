@@ -187,6 +187,28 @@ class DockTest(unittest.TestCase):
                 dock.install()
             self.assertEqual((link / "original").read_text(), "owner skill")
 
+    def test_migration_is_owned_backed_up_and_idempotent(self):
+        unit = self.home / "systemd/user/omarchy-local-ai-assistant.service"
+        unit.parent.mkdir(parents=True)
+        unit.write_text('[Unit]\nDescription=Local AI Omarchy Assistant\n[Service]\nExecStart="/plugins/local-ai-assistant" --config "/config.toml" run\n')
+        bindings = self.home / ".config/hypr/bindings.lua"
+        bindings.parent.mkdir(parents=True)
+        original = 'o.bind("SUPER + A", "Voice", "/plugins/local-ai-assistant voice-start")\no.bind("SUPER + B", "Browser", "browser")\n'
+        bindings.write_text(original)
+        with patch.object(dock.Path, "home", return_value=self.home), patch.object(dock, "run") as calls, patch("sys.stdout", io.StringIO()):
+            dock.migrate()
+            dock.migrate()
+        self.assertFalse(unit.exists())
+        self.assertEqual(bindings.read_text(), 'o.bind("SUPER + B", "Browser", "browser")\n')
+        backups = list((self.state / "legacy-backups").glob("*/bindings.lua"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), original)
+        self.assertEqual(sum(1 for call in calls.call_args_list if "disable" in call.args[0]), 1)
+        unit.write_text('[Service]\nExecStart=/usr/bin/unrelated\n')
+        with patch.object(dock.Path, "home", return_value=self.home), self.assertRaises(ValueError):
+            dock.migrate()
+        self.assertTrue(unit.exists())
+
     def test_successful_download_has_provenance_and_is_idempotent(self):
         data = b"GGUFpayload"
         catalog = {"test": {"repository": "test/model", "revision": "a" * 40,

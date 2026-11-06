@@ -137,7 +137,7 @@ Column {
     Text {
       width: parent.width
       text: parent.selectedModel ? (parent.selectedModel.context / 1024) + "K context · "
-        + parent.selectedModel.slots + " simultaneous requests · "
+        + parent.selectedModel.slots + (parent.selectedModel.slots === 1 ? " request at a time · " : " simultaneous requests · ")
         + (parent.selectedModel.state === "loaded" ? "Ready" : "Loads on request") : ""
       color: controller.dim
       font.family: controller.fontFamily

@@ -1,5 +1,9 @@
 # Z13 validation — 6 November 2026
 
+This is the initial 0.11 validation record. Version 0.12 retires the optional
+assistant; its historical checks below are not current product features. See
+[migration](MIGRATING.md) and the [Qwen 3.8 record](QWEN38-Z13.md).
+
 Hardware: Ryzen AI Max+ 395 / Radeon 8060S (Strix Halo), 128 GB nominal shared
 memory; Omarchy 4.0.6, Linux x86_64. GPU inference used the existing Vulkan build
 at llama.cpp commit `b81c99b`. A fresh CPU build of pinned upstream commit
@@ -76,7 +80,7 @@ running with the two small models and a two-model resident limit.
 - Full Codex coding-task quality and longer Pi tool workflows.
 - Large model capacity/latency, long contexts and sustained multi-user load.
 - CUDA/HIP/Vulkan bootstrap across fresh machines with different drivers.
-- macOS service lifecycle, MLX and Apple Linux GPU performance: [issue #13](https://github.com/gustavonline/omarchy-llama-cpp-local-ai/issues/13).
+- macOS service lifecycle, MLX and Apple Linux GPU performance: [issue #13](https://github.com/gustavonline/omarchy-ai-model-dock/issues/13).
 - Future Omarchy/llama.cpp versions. User-owned paths and native APIs reduce
   update coupling; they are not a promise of compatibility with every update.
 

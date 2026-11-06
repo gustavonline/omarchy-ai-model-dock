@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Omarchy Model Dock: user-owned llama.cpp provisioning and diagnostics."""
+"""Omarchy AI Model Dock: user-owned llama.cpp provisioning and diagnostics."""
 import argparse
 import concurrent.futures
 import contextlib
@@ -192,7 +192,7 @@ def render(config):
     empty = CONFIG / "discovery"
     empty.mkdir(exist_ok=True)
     argv += ["--models-dir", empty]
-    service = "\n".join(["[Unit]", "Description=Omarchy Model Dock", "After=network.target", "",
+    service = "\n".join(["[Unit]", "Description=Omarchy AI Model Dock", "After=network.target", "",
         "[Service]", "Type=simple", "ExecStart=" + " ".join(unit_arg(x) for x in argv),
         "Restart=on-failure", "RestartSec=5", "TimeoutStopSec=30", "KillMode=control-group",
         "UMask=0077", "NoNewPrivileges=yes", "LimitCORE=0", "PrivateTmp=yes",
@@ -201,7 +201,7 @@ def render(config):
         "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX", "",
         "[Install]", "WantedBy=default.target", ""])
     target = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd/user" / UNIT
-    if target.exists() and "Description=Omarchy Model Dock\n" not in target.read_text():
+    if target.exists() and "Description=Omarchy AI Model Dock\n" not in target.read_text():
         raise ValueError(f"Refusing to overwrite an unrelated service: {target}")
     atomic(target, service)
     run(["systemctl", "--user", "daemon-reload"])
@@ -518,6 +518,39 @@ def install():
     print("Installed omarchy-model-dock and the agent skill. No root changes.")
 
 
+def migrate():
+    """Retire only integrations owned by the removed Local AI assistant."""
+    unit = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd/user/omarchy-local-ai-assistant.service"
+    bindings = Path.home() / ".config/hypr/bindings.lua"
+    backup = STATE / "legacy-backups" / time.strftime("%Y%m%d-%H%M%S")
+    changed = []
+    if unit.is_symlink():
+        raise ValueError("Preserving a linked legacy unit; review its owner before retiring it")
+    if unit.exists():
+        text = unit.read_text()
+        if not re.search(r'^ExecStart=.*[/]local-ai-assistant(?:"|\s).*\brun\b', text, re.M) \
+                or not re.search(r'^Description=Local AI (?:Omarchy )?Assistant$', text, re.M):
+            raise ValueError("Preserving an unrelated service with the legacy unit name")
+        atomic(backup / unit.name, text)
+        run(["systemctl", "--user", "disable", "--now", unit.name])
+        unit.unlink()
+        run(["systemctl", "--user", "daemon-reload"])
+        changed.append("retired owned assistant service")
+    if bindings.is_symlink():
+        raise ValueError("Preserving linked Hyprland bindings; review their owner before editing")
+    if bindings.exists():
+        original = bindings.read_text()
+        lines = original.splitlines(keepends=True)
+        kept = [line for line in lines if not re.match(
+            r'^\s*o\.bind\(.*local-ai-assistant.*\bvoice-(?:start|stop)\b', line)]
+        if kept != lines:
+            atomic(backup / "bindings.lua", original)
+            atomic(bindings, "".join(kept), mode=bindings.stat().st_mode & 0o777)
+            changed.append("removed owned push-to-talk bindings; apply with normal Hyprland config reload")
+    emit({"changes": changed, "backup": str(backup) if changed else None,
+          "retained": "model files, keys, legacy profiles and private assistant settings/history"})
+
+
 def client(args):
     config = load()
     model = next((m for m in config["models"] if m["id"] == args.model), None)
@@ -628,7 +661,7 @@ def bounded(low, high):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("inspect", "status", "install", "setup", "check", "stop"):
+    for name in ("inspect", "status", "install", "setup", "check", "stop", "migrate"):
         sub.add_parser(name)
     for name in ("load", "unload", "remove"):
         sub.add_parser(name).add_argument("model", type=validate_id)
@@ -683,6 +716,7 @@ def main():
     if args.action == "inspect": emit(probe())
     elif args.action == "status": emit(status())
     elif args.action == "install": install()
+    elif args.action == "migrate": migrate()
     elif args.action == "setup": setup()
     elif args.action == "fetch": fetch(args)
     elif args.action == "add": add(args)

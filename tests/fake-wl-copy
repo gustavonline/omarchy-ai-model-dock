@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-IFS= read -r -d '' value || true
-printf '%s' "$value" >"$LOCAL_AI_ASSISTANT_FAKE_CLIPBOARD"

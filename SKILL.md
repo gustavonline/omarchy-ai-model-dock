@@ -1,14 +1,19 @@
 ---
 name: omarchy-model-dock
-description: Set up, run, tune and connect local inference models with Omarchy Model Dock. Use for hardware inspection, verified GGUF downloads, llama.cpp model serving, latency tests and authenticated remote access.
+description: Set up, run, tune and connect local inference models with Omarchy AI Model Dock. Use for hardware inspection, verified GGUF downloads, llama.cpp model serving, latency tests and authenticated remote access.
 ---
 
-# Omarchy Model Dock
+# Omarchy AI Model Dock
 
 Use `omarchy-model-dock` after installation, or `./model-dock` in this directory.
 `./model-dock install` links the CLI and this skill for Codex, Claude and other
 agents. The native panel lives on the right side of Omarchy's bar. Its ID remains
 `io.github.gustavonline.local-ai`; existing Local AI installs keep their identity.
+
+For upgrades from the former always-on assistant, read
+[migration and recovery](docs/MIGRATING.md), then run `migrate` to retire its owned
+service and voice bindings with backups. Keep the owner's private data and
+unrelated bindings. This plugin serves models; it does not observe the desktop.
 
 ## Set up a machine
 

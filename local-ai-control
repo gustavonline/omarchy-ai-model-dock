@@ -12,7 +12,7 @@ requested_action="${1:-status}"
 empty_status() {
   jq -nc --arg config "$config_file" '{
     profile:"stopped", state:"inactive", label:"No local runtime configured",
-    detail:("Create " + $config), backend:"Local AI", endpoint:"",
+    detail:("Create " + $config), backend:"Local runtime", endpoint:"",
     model:"", variant:"", context:"", configFile:$config,
     defaultProfile:"", profiles:[]
   }'
@@ -329,7 +329,7 @@ for item in requested:
 
 current_names = [profile.get("name") for profile in profiles]
 if set(mapping) != set(current_names) or len(mapping) != len(current_names):
-    raise SystemExit("runtime profiles changed; reopen Local AI and try again")
+    raise SystemExit("runtime profiles changed; reopen Local runtime and try again")
 new_names = list(mapping.values())
 if len(new_names) != len(set(new_names)):
     raise SystemExit("runtime names must be unique")
@@ -343,7 +343,7 @@ def quoted(value):
     return json.dumps(value, ensure_ascii=False)
 
 lines = [
-    "# Local AI runtime profiles. Names are user-facing and editable in the panel.",
+    "# Local runtime runtime profiles. Names are user-facing and editable in the panel.",
     "# Model, quantization, context, and endpoint are discovered from each service.",
     f"default = {quoted(config.get('default', ''))}",
     "",

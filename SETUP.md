@@ -7,12 +7,12 @@ load on demand. No Docker, Python packages or root service are needed.
 The current automated serving target is Linux with systemd. The initial hardware
 validation is AMD Ryzen AI Max+ 395 / Radeon 8060S (Strix Halo), using Vulkan.
 Other platforms are detected but must be measured before claiming equivalent
-support. [Mac Studio and MLX tracking](https://github.com/gustavonline/omarchy-llama-cpp-local-ai/issues/13).
+support. [Mac Studio and MLX tracking](https://github.com/gustavonline/omarchy-ai-model-dock/issues/13).
 
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/gustavonline/omarchy-llama-cpp-local-ai --enable --yes
+omarchy plugin add https://github.com/gustavonline/omarchy-ai-model-dock --enable --yes
 ```
 
 Click **Set up Model Dock** in the right-hand bar panel. This opens a short
@@ -123,11 +123,15 @@ lid policy, AC/network restrictions and OS updates are outside this plugin.
 
 ## Existing Local AI installs and upgrades
 
-The plugin ID and `local-ai-control`, `local-ai-assistant`, existing TOML profiles
-and services remain supported. Existing profiles are accessible through the
+The plugin ID and `local-ai-control` remain stable. Existing TOML runtime profiles
+and their services remain supported and are accessible through the
 panel's **Existing runtime profiles** disclosure. They are not automatically
 imported, stopped, renamed or rewritten by Model Dock. Avoid running a large
 legacy profile alongside the dock without checking memory pressure.
+
+Version 0.12 retires the former always-on assistant. Run `model-dock migrate`
+to back up and remove its owned user service and push-to-talk bindings. It keeps
+private settings and history. See [migration and recovery](docs/MIGRATING.md).
 
 Managed configuration, model files, reports and the key live outside the checkout.
 `omarchy plugin update` therefore updates code without replacing these files.

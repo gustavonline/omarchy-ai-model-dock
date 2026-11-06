@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0 — Omarchy AI Model Dock
+
+- Rename the public repository to `omarchy-ai-model-dock`; keep the installed
+  plugin identity, CLI, runtime profiles, models and private configuration stable.
+- Focus the native panel on model slots, server status and endpoint access.
+- Remove the former always-on assistant, desktop observer, suggestions, voice UI
+  and harness delegation from the current package.
+- Add an idempotent migration command that backs up and retires only the owned
+  assistant service and push-to-talk bindings; retain private settings and history.
+- Rewrite installation, agent guidance and release checks around local inference.
+- Retain dated benchmark evidence and historical assistant changes below.
+
 ## 0.11.1
 
 - Add per-model saved-prompt RAM budgets, physical prompt batches and opt-in native MTP draft length.
